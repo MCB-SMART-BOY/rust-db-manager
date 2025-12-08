@@ -1,0 +1,283 @@
+//! 单元格渲染
+
+#![allow(clippy::too_many_arguments)]
+
+use super::mode::GridMode;
+use super::state::DataGridState;
+use super::{
+    CELL_TRUNCATE_LEN, COLOR_CELL_EDITING, COLOR_CELL_MODIFIED, COLOR_CELL_SELECTED,
+    COLOR_ROW_NUM_BG, COLOR_ROW_SELECTED, COLOR_VISUAL_SELECT,
+};
+use crate::ui::styles::GRAY;
+use egui::{self, Color32, Key, RichText, Sense, TextEdit};
+
+// 偶数行背景色（斑马线效果）
+const COLOR_ROW_EVEN: Color32 = Color32::from_rgb(35, 38, 45);
+// NULL 值颜色
+const COLOR_NULL: Color32 = Color32::from_rgb(120, 120, 140);
+
+/// 渲染列头
+pub fn render_column_header(
+    ui: &mut egui::Ui,
+    col_name: &str,
+    col_idx: usize,
+    state: &DataGridState,
+    columns_to_filter: &mut Vec<String>,
+) {
+    ui.horizontal(|ui| {
+        let is_cursor_col = state.cursor.1 == col_idx;
+        let has_filter = state.filters.iter().any(|f| f.column == col_name);
+
+        let text = if is_cursor_col {
+            RichText::new(col_name).strong().color(state.mode.color())
+        } else if has_filter {
+            RichText::new(col_name)
+                .strong()
+                .color(Color32::from_rgb(150, 200, 100))
+        } else {
+            RichText::new(col_name).strong()
+        };
+        ui.label(text);
+
+        let filter_btn = if has_filter { "▼" } else { "▽" };
+        let btn_color = if has_filter {
+            Color32::from_rgb(150, 200, 100)
+        } else {
+            GRAY
+        };
+        if ui
+            .add(egui::Button::new(RichText::new(filter_btn).small().color(btn_color)).small())
+            .on_hover_text(format!("为 {} 列添加/编辑筛选条件", col_name))
+            .clicked()
+        {
+            columns_to_filter.push(col_name.to_string());
+        }
+    });
+}
+
+/// 渲染行号单元格
+pub fn render_row_number(
+    ui: &mut egui::Ui,
+    row_idx: usize,
+    is_cursor_row: bool,
+    is_deleted: bool,
+    state: &mut DataGridState,
+) {
+    let is_even_row = row_idx.is_multiple_of(2);
+    let bg = if is_deleted {
+        Color32::from_rgb(150, 50, 50)
+    } else if is_cursor_row {
+        COLOR_ROW_SELECTED
+    } else if is_even_row {
+        // 偶数行使用稍深的背景色
+        Color32::from_rgb(35, 35, 40)
+    } else {
+        COLOR_ROW_NUM_BG
+    };
+
+    egui::Frame::none()
+        .fill(bg)
+        .inner_margin(4.0)
+        .show(ui, |ui| {
+            let text = if is_deleted {
+                RichText::new(format!("✕{}", row_idx + 1))
+                    .color(Color32::WHITE)
+                    .small()
+            } else if is_cursor_row {
+                RichText::new(format!("{}", row_idx + 1))
+                    .color(state.mode.color())
+                    .small()
+            } else {
+                RichText::new(format!("{}", row_idx + 1))
+                    .color(GRAY)
+                    .small()
+            };
+
+            let response = ui.add(egui::Label::new(text).sense(Sense::click()));
+
+            if response.clicked() {
+                state.cursor.0 = row_idx;
+                state.focused = true;
+            }
+
+            response.context_menu(|ui| {
+                if is_deleted {
+                    if ui.button("取消删除 [u]").clicked() {
+                        state.rows_to_delete.retain(|&x| x != row_idx);
+                        ui.close_menu();
+                    }
+                } else if ui.button("标记删除 [Space+d]").clicked() {
+                    if !state.rows_to_delete.contains(&row_idx) {
+                        state.rows_to_delete.push(row_idx);
+                    }
+                    ui.close_menu();
+                }
+            });
+        });
+}
+
+/// 渲染可编辑的数据单元格
+pub fn render_editable_cell(
+    ui: &mut egui::Ui,
+    cell: &str,
+    row_idx: usize,
+    col_idx: usize,
+    is_cursor_row: bool,
+    is_row_deleted: bool,
+    state: &mut DataGridState,
+) {
+    let is_cursor = state.cursor == (row_idx, col_idx);
+    let is_editing = state.editing_cell == Some((row_idx, col_idx));
+    let is_modified = state.modified_cells.contains_key(&(row_idx, col_idx));
+    let is_selected = state.mode == GridMode::Select && state.is_in_selection(row_idx, col_idx);
+    let is_even_row = row_idx.is_multiple_of(2);
+
+    let display_value = state
+        .modified_cells
+        .get(&(row_idx, col_idx))
+        .cloned()
+        .unwrap_or_else(|| cell.to_string());
+
+    let bg_color = if is_row_deleted {
+        Color32::from_rgba_unmultiplied(150, 50, 50, 100)
+    } else if is_editing {
+        COLOR_CELL_EDITING
+    } else if is_selected {
+        COLOR_VISUAL_SELECT
+    } else if is_modified {
+        COLOR_CELL_MODIFIED
+    } else if is_cursor {
+        COLOR_CELL_SELECTED
+    } else if is_cursor_row {
+        COLOR_ROW_SELECTED
+    } else if is_even_row {
+        // 斑马线效果：偶数行使用不同背景色
+        COLOR_ROW_EVEN
+    } else {
+        Color32::TRANSPARENT
+    };
+
+    egui::Frame::none()
+        .fill(bg_color)
+        .inner_margin(4.0)
+        .show(ui, |ui| {
+            if is_editing && state.mode == GridMode::Insert {
+                render_editing_cell(ui, state, row_idx, col_idx);
+            } else {
+                render_display_cell(
+                    ui,
+                    state,
+                    cell,
+                    &display_value,
+                    row_idx,
+                    col_idx,
+                    is_cursor,
+                    is_row_deleted,
+                );
+            }
+        });
+}
+
+fn render_editing_cell(
+    ui: &mut egui::Ui,
+    state: &mut DataGridState,
+    row_idx: usize,
+    col_idx: usize,
+) {
+    let response = ui.add(
+        TextEdit::singleline(&mut state.edit_text)
+            .desired_width(ui.available_width() - 8.0)
+            .font(egui::TextStyle::Monospace),
+    );
+
+    let should_exit = ui.input(|i| i.key_pressed(Key::Escape) || i.key_pressed(Key::Enter));
+
+    if should_exit || response.lost_focus() {
+        if state.edit_text != state.original_value {
+            state
+                .modified_cells
+                .insert((row_idx, col_idx), state.edit_text.clone());
+        }
+        state.editing_cell = None;
+        state.mode = GridMode::Normal;
+    }
+
+    response.request_focus();
+}
+
+fn render_display_cell(
+    ui: &mut egui::Ui,
+    state: &mut DataGridState,
+    cell: &str,
+    display_value: &str,
+    row_idx: usize,
+    col_idx: usize,
+    is_cursor: bool,
+    is_row_deleted: bool,
+) {
+    let cell_text = format_cell_text(display_value, is_cursor);
+    let response = ui.add(egui::Label::new(cell_text).sense(Sense::click()));
+
+    if response.clicked() {
+        state.cursor = (row_idx, col_idx);
+        state.focused = true;
+    }
+
+    if response.double_clicked() && !is_row_deleted {
+        state.mode = GridMode::Insert;
+        state.editing_cell = Some((row_idx, col_idx));
+        state.edit_text = display_value.to_string();
+        state.original_value = cell.to_string();
+    }
+
+    let show_hover = display_value.len() > CELL_TRUNCATE_LEN;
+
+    response.context_menu(|ui| {
+        if ui.button("编辑 [i]").clicked() {
+            state.mode = GridMode::Insert;
+            state.editing_cell = Some((row_idx, col_idx));
+            state.edit_text = display_value.to_string();
+            state.original_value = cell.to_string();
+            ui.close_menu();
+        }
+        if ui.button("复制 [y]").clicked() {
+            state.clipboard = Some(display_value.to_string());
+            ui.ctx().copy_text(display_value.to_string());
+            ui.close_menu();
+        }
+        if ui.button("粘贴 [p]").clicked() {
+            if let Some(text) = &state.clipboard {
+                state
+                    .modified_cells
+                    .insert((row_idx, col_idx), text.clone());
+            }
+            ui.close_menu();
+        }
+        if state.modified_cells.contains_key(&(row_idx, col_idx)) && ui.button("还原 [u]").clicked()
+        {
+            state.modified_cells.remove(&(row_idx, col_idx));
+            ui.close_menu();
+        }
+    });
+
+    if show_hover {
+        response.on_hover_text(display_value);
+    }
+}
+
+fn format_cell_text(cell: &str, is_cursor: bool) -> RichText {
+    let text = if cell == "NULL" {
+        // NULL 值使用斜体、特殊颜色和背景标记
+        RichText::new("∅ NULL").italics().color(COLOR_NULL)
+    } else if cell.len() > CELL_TRUNCATE_LEN {
+        RichText::new(format!("{}...", &cell[..CELL_TRUNCATE_LEN - 3]))
+    } else {
+        RichText::new(cell)
+    };
+
+    if is_cursor {
+        text.underline()
+    } else {
+        text
+    }
+}

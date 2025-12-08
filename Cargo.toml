@@ -1,0 +1,57 @@
+[package]
+name = "rust-db-manager"
+version = "0.1.0"
+edition = "2021"
+description = "跨平台数据库管理工具，支持 SQLite/PostgreSQL/MySQL"
+authors = ["Your Name"]
+license = "MIT"
+repository = "https://github.com/yourname/rust-db-manager"
+keywords = ["database", "gui", "sqlite", "postgresql", "mysql"]
+categories = ["database", "gui"]
+
+[dependencies]
+# GUI 框架
+eframe = "0.27"
+egui = "0.27"
+egui_extras = "0.27"
+
+# 异步运行时
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+
+# 数据库驱动
+rusqlite = "0.31"
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+mysql_async = { version = "0.33", default-features = false, features = ["default"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# 工具库
+thiserror = "1.0"
+rfd = "0.14"
+dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+lazy_static = "1.4"
+base64 = "0.22"
+
+[profile.release]
+opt-level = "z"     # 优化体积
+lto = true          # 链接时优化
+strip = true        # 移除符号
+panic = "abort"     # 精简 panic 代码
+codegen-units = 1   # 更好的优化
+
+[package.metadata.appimage]
+assets = ["icon.png"]
+auto_link = true
+auto_link_exclude_list = [
+    "libc.so*",
+    "libdl.so*",
+    "libpthread.so*",
+    "libm.so*",
+    "libgcc_s.so*",
+    "librt.so*",
+    "ld-linux-x86-64.so*",
+]

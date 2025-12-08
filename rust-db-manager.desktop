@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Rust DB Manager
+Comment=A simple database manager written in Rust
+Exec=rust-db-manager
+Icon=rust-db-manager
+Type=Application
+Categories=Development;Utility;
