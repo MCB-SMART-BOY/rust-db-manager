@@ -56,104 +56,33 @@ fn main() -> eframe::Result<()> {
     )
 }
 
+/// 内嵌的中文字体（霞鹜文楷 Lite）
+const EMBEDDED_CHINESE_FONT: &[u8] = include_bytes!("../assets/fonts/LXGWWenKaiLite-Regular.ttf");
+
 /// 配置字体
 ///
-/// 加载中文字体和符号字体，确保 Unicode 符号正确显示。
+/// 使用内嵌的中文字体，确保在所有平台上都能正确显示中文。
 fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
-    // 系统中文字体路径列表
-    let cjk_font_paths = [
-        // Arch Linux noto-fonts-cjk
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Medium.ttc",
-        // 其他 Linux 发行版
-        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/OTF/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/TTF/NotoSansCJK-Regular.ttc",
-        // 文泉驿字体
-        "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
-        "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
-        // 思源字体
-        "/usr/share/fonts/adobe-source-han-sans/SourceHanSansCN-Regular.otf",
-        "/usr/share/fonts/TTF/SourceHanSansCN-Regular.otf",
-    ];
+    // 使用内嵌的中文字体
+    fonts.font_data.insert(
+        "chinese_font".to_owned(),
+        egui::FontData::from_static(EMBEDDED_CHINESE_FONT),
+    );
 
-    // 符号字体路径（支持 Unicode 符号如 ▸ ▾ 等）
-    let symbol_font_paths = [
-        "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
-        "/usr/share/fonts/TTF/NotoSansSymbols2-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
-        "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
-        "/usr/share/fonts/TTF/NotoSansSymbols-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    ];
+    // 配置字体优先级：中文字体优先
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "chinese_font".to_owned());
 
-    let mut found_cjk = false;
-    let mut found_symbol = false;
-
-    // 加载中文字体
-    for path in &cjk_font_paths {
-        if let Ok(font_data) = std::fs::read(path) {
-            fonts.font_data.insert(
-                "chinese_font".to_owned(),
-                egui::FontData::from_owned(font_data),
-            );
-            found_cjk = true;
-            break;
-        }
-    }
-
-    // 加载符号字体
-    for path in &symbol_font_paths {
-        if let Ok(font_data) = std::fs::read(path) {
-            fonts.font_data.insert(
-                "symbol_font".to_owned(),
-                egui::FontData::from_owned(font_data),
-            );
-            found_symbol = true;
-            break;
-        }
-    }
-
-    // 配置字体优先级：中文字体 -> 符号字体 -> 默认字体
-    if found_cjk {
-        fonts
-            .families
-            .entry(egui::FontFamily::Proportional)
-            .or_default()
-            .insert(0, "chinese_font".to_owned());
-
-        fonts
-            .families
-            .entry(egui::FontFamily::Monospace)
-            .or_default()
-            .insert(0, "chinese_font".to_owned());
-    }
-
-    if found_symbol {
-        // 符号字体放在中文字体之后，作为 fallback
-        let pos = if found_cjk { 1 } else { 0 };
-
-        fonts
-            .families
-            .entry(egui::FontFamily::Proportional)
-            .or_default()
-            .insert(pos, "symbol_font".to_owned());
-
-        fonts
-            .families
-            .entry(egui::FontFamily::Monospace)
-            .or_default()
-            .insert(pos, "symbol_font".to_owned());
-    }
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "chinese_font".to_owned());
 
     ctx.set_fonts(fonts);
-
-    if !found_cjk {
-        eprintln!("警告: 未找到中文字体，请安装 noto-fonts-cjk 字体包");
-    }
 }
