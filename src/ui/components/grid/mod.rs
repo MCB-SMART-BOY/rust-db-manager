@@ -19,7 +19,7 @@ mod mode;
 mod render;
 mod state;
 
-pub use actions::DataGridActions;
+pub use actions::{quote_identifier, DataGridActions};
 pub use filter::ColumnFilter;
 pub use mode::GridMode;
 pub use state::DataGridState;
@@ -362,15 +362,16 @@ impl DataGrid {
 
                 if has_changes {
                     ui.separator();
+                    // 使用图标+文字双重指示，对色盲友好
                     let mut stats = Vec::new();
                     if !state.modified_cells.is_empty() {
-                        stats.push(format!("{}处修改", state.modified_cells.len()));
+                        stats.push(format!("✎ {}处修改", state.modified_cells.len()));
                     }
                     if !state.rows_to_delete.is_empty() {
-                        stats.push(format!("{}行删除", state.rows_to_delete.len()));
+                        stats.push(format!("− {}行删除", state.rows_to_delete.len()));
                     }
                     if !state.new_rows.is_empty() {
-                        stats.push(format!("{}行新增", state.new_rows.len()));
+                        stats.push(format!("+ {}行新增", state.new_rows.len()));
                     }
                     ui.label(
                         RichText::new(stats.join(", "))

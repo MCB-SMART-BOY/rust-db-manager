@@ -7,8 +7,8 @@ pub mod styles;
 
 // 重新导出常用组件
 pub use components::{
-    DataGrid, DataGridState, SearchBar, SqlEditor, SqlEditorActions, Toolbar, ToolbarActions,
-    Welcome,
+    quote_identifier, DataGrid, DataGridState, SearchBar, SqlEditor, SqlEditorActions, Toolbar,
+    ToolbarActions, Welcome,
 };
 pub use dialogs::{ConfirmDialog, ConnectionDialog, ExportDialog, HelpDialog};
 pub use panels::{HistoryPanel, Sidebar, SidebarActions};

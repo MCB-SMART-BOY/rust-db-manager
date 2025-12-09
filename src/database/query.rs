@@ -62,6 +62,28 @@ pub async fn get_tables_for_database(
     }
 }
 
+/// 获取表的主键列名
+/// 
+/// 从数据库元数据中查询主键信息，返回主键列名（如果存在）
+#[allow(dead_code)] // 预留函数供将来使用
+pub async fn get_primary_key_column(
+    config: &ConnectionConfig,
+    table: &str,
+) -> Result<Option<String>, DbError> {
+    let config = config.clone();
+    let table = table.to_string();
+
+    match config.db_type {
+        DatabaseType::SQLite => {
+            task::spawn_blocking(move || get_sqlite_primary_key(&config, &table))
+                .await
+                .map_err(|e| DbError::Query(format!("任务执行失败: {}", e)))?
+        }
+        DatabaseType::PostgreSQL => get_postgres_primary_key(&config, &table).await,
+        DatabaseType::MySQL => get_mysql_primary_key(&config, &table).await,
+    }
+}
+
 
 
 /// 执行 SQL 查询或命令
@@ -157,6 +179,36 @@ fn connect_sqlite(config: &ConnectionConfig) -> Result<Vec<String>, DbError> {
     tables.map_err(|e| DbError::Query(e.to_string()))
 }
 
+/// 获取 SQLite 表的主键列名
+#[allow(dead_code)]
+fn get_sqlite_primary_key(config: &ConnectionConfig, table: &str) -> Result<Option<String>, DbError> {
+    let conn = SqliteConn::open(&config.database)
+        .map_err(|e| DbError::Connection(format!("SQLite 连接失败: {}", e)))?;
+    
+    // 使用 PRAGMA table_info 查询主键列（pk 字段 > 0 表示是主键）
+    let escaped_table = table.replace('\'', "''");
+    let sql = format!("PRAGMA table_info('{}')", escaped_table);
+    
+    let mut stmt = conn.prepare(&sql)
+        .map_err(|e| DbError::Query(e.to_string()))?;
+    
+    // table_info 返回: cid, name, type, notnull, dflt_value, pk
+    let pk_columns: Vec<String> = stmt
+        .query_map([], |row| {
+            let pk: i32 = row.get(5)?;  // pk 列
+            let name: String = row.get(1)?;  // name 列
+            Ok((name, pk))
+        })
+        .map_err(|e| DbError::Query(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .filter(|(_, pk)| *pk > 0)
+        .map(|(name, _)| name)
+        .collect();
+    
+    // 返回第一个主键列（通常只有一个）
+    Ok(pk_columns.into_iter().next())
+}
+
 fn execute_sqlite(config: &ConnectionConfig, sql: &str) -> Result<QueryResult, DbError> {
     let conn = SqliteConn::open(&config.database)
         .map_err(|e| DbError::Connection(format!("SQLite 连接失败: {}", e)))?;
@@ -236,6 +288,28 @@ async fn get_postgres_tables(config: &ConnectionConfig, database: &str) -> Resul
         .map_err(|e| DbError::Query(e.to_string()))?;
 
     Ok(rows.iter().map(|r| r.get(0)).collect())
+}
+
+/// 获取 PostgreSQL 表的主键列名
+#[allow(dead_code)]
+async fn get_postgres_primary_key(config: &ConnectionConfig, table: &str) -> Result<Option<String>, DbError> {
+    let client = POOL_MANAGER.get_pg_client(config).await?;
+    
+    // 查询 information_schema 获取主键列
+    let rows = client
+        .query(
+            "SELECT a.attname
+             FROM pg_index i
+             JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+             WHERE i.indrelid = $1::regclass
+             AND i.indisprimary
+             LIMIT 1",
+            &[&table],
+        )
+        .await
+        .map_err(|e| DbError::Query(format!("查询主键失败: {}", e)))?;
+    
+    Ok(rows.first().map(|r| r.get(0)))
 }
 
 
@@ -347,6 +421,37 @@ async fn get_mysql_tables(config: &ConnectionConfig, database: &str) -> Result<V
         .map_err(|e| DbError::Query(e.to_string()))?;
 
     Ok(tables)
+}
+
+/// 获取 MySQL 表的主键列名
+#[allow(dead_code)]
+async fn get_mysql_primary_key(config: &ConnectionConfig, table: &str) -> Result<Option<String>, DbError> {
+    let pool = POOL_MANAGER.get_mysql_pool(config).await?;
+    
+    let mut conn = pool
+        .get_conn()
+        .await
+        .map_err(|e| DbError::Connection(format!("MySQL 获取连接失败: {}", e)))?;
+    
+    // 使用 SHOW KEYS 查询主键列
+    let escaped_table = table.replace('`', "``").replace('.', "_");
+    let sql = format!(
+        "SHOW KEYS FROM `{}` WHERE Key_name = 'PRIMARY'",
+        escaped_table
+    );
+    
+    let result: Vec<mysql_async::Row> = conn
+        .query(&sql)
+        .await
+        .map_err(|e| DbError::Query(format!("查询主键失败: {}", e)))?;
+    
+    // Column_name 是第 5 列（索引 4）
+    if let Some(row) = result.first() {
+        let col_name: Option<String> = row.get(4);
+        return Ok(col_name);
+    }
+    
+    Ok(None)
 }
 
 

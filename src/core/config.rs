@@ -106,7 +106,32 @@ impl AppConfig {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
         let toml_str = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
-        fs::write(&path, toml_str).map_err(|e| e.to_string())?;
+        
+        // 原子写入：先写入临时文件，再重命名
+        // 这样即使程序在写入过程中崩溃，原配置文件也不会损坏
+        let temp_path = path.with_extension("toml.tmp");
+        fs::write(&temp_path, &toml_str).map_err(|e| format!("写入临时文件失败: {}", e))?;
+        
+        // 设置临时文件权限（在重命名之前）
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(&temp_path, permissions).map_err(|e| e.to_string())?;
+        }
+        
+        // 原子重命名（在同一文件系统上是原子操作）
+        fs::rename(&temp_path, &path).map_err(|e| format!("重命名配置文件失败: {}", e))?;
+
+        // Windows 上无法设置类似权限，记录警告（仅首次）
+        #[cfg(windows)]
+        {
+            use std::sync::Once;
+            static WARN_ONCE: Once = Once::new();
+            WARN_ONCE.call_once(|| {
+                eprintln!("[warn] Windows 上配置文件权限无法限制为私有，请确保配置目录安全");
+            });
+        }
 
         Ok(())
     }

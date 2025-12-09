@@ -1,69 +1,91 @@
 //! 欢迎页面组件 - 应用启动时的欢迎界面
 
 use crate::ui::styles::{GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD, SPACING_LG};
-use egui::{self, Align, Color32, Layout, RichText, Rounding, Vec2};
+use egui::{self, Color32, RichText, Rounding, Vec2};
 
 pub struct Welcome;
 
 impl Welcome {
     pub fn show(ui: &mut egui::Ui) {
-        let available_width = ui.available_width();
-        let available_height = ui.available_height();
+        // 获取可用区域
+        let available_rect = ui.available_rect_before_wrap();
+        
+        // 内容尺寸估算
+        let content_width = 600.0;
+        let content_height = 450.0;
+        
+        // 计算居中位置
+        let x = available_rect.min.x + (available_rect.width() - content_width) / 2.0;
+        let y = available_rect.min.y + (available_rect.height() - content_height) / 2.0;
+        
+        // 使用 Area 实现真正的居中
+        egui::Area::new(egui::Id::new("welcome_center"))
+            .fixed_pos(egui::pos2(x.max(available_rect.min.x), y.max(available_rect.min.y)))
+            .show(ui.ctx(), |ui| {
+                ui.set_max_width(content_width);
+                
+                ui.vertical_centered(|ui| {
+                    // Logo 和标题区域
+                    Self::show_header(ui);
 
-        // 主容器 - 垂直居中
-        ui.allocate_ui_with_layout(
-            Vec2::new(available_width, available_height),
-            Layout::top_down(Align::Center),
-            |ui| {
-                // 动态计算顶部间距，使内容垂直居中
-                let content_height = 450.0; // 估算内容高度
-                let top_space = ((available_height - content_height) / 2.0).max(20.0);
-                ui.add_space(top_space);
+                    ui.add_space(SPACING_LG * 2.0);
 
-                // Logo 和标题区域
-                Self::show_header(ui);
+                    // 数据库卡片
+                    Self::show_database_cards(ui);
 
-                ui.add_space(SPACING_LG * 2.0);
+                    ui.add_space(SPACING_LG * 2.0);
 
-                // 数据库卡片
-                Self::show_database_cards(ui, available_width);
+                    // 快速开始提示
+                    Self::show_quick_start(ui);
 
-                ui.add_space(SPACING_LG * 2.0);
+                    ui.add_space(SPACING_LG * 2.0);
 
-                // 快速开始提示
-                Self::show_quick_start(ui);
-
-                ui.add_space(SPACING_LG * 2.0);
-
-                // 快捷键
-                Self::show_shortcuts(ui);
-            },
-        );
+                    // 快捷键
+                    Self::show_shortcuts(ui);
+                });
+            });
     }
 
     /// 显示头部标题
     fn show_header(ui: &mut egui::Ui) {
-        // 应用图标（使用文本模拟）
-        ui.label(
-            RichText::new("🗄️")
-                .size(48.0)
-        );
+        // 应用图标（使用简单的方块图案代替 emoji）
+        ui.horizontal(|ui| {
+            ui.add_space((ui.available_width() - 60.0) / 2.0);
+            // 绘制简单的数据库图标
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(60.0, 50.0), egui::Sense::hover());
+            let painter = ui.painter();
+            
+            // 绘制两个堆叠的圆柱体表示数据库
+            let center_x = rect.center().x;
+            let top_y = rect.top() + 10.0;
+            
+            // 上层圆柱
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    egui::pos2(center_x - 20.0, top_y),
+                    Vec2::new(40.0, 15.0)
+                ),
+                Rounding::same(3.0),
+                Color32::from_rgb(100, 160, 220),
+            );
+            
+            // 下层圆柱
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    egui::pos2(center_x - 25.0, top_y + 20.0),
+                    Vec2::new(50.0, 18.0)
+                ),
+                Rounding::same(4.0),
+                Color32::from_rgb(80, 140, 200),
+            );
+        });
 
         ui.add_space(SPACING_MD);
 
         // 主标题
         ui.label(
-            RichText::new("Rust 数据库管理器")
-                .size(28.0)
-                .strong()
-        );
-
-        ui.add_space(SPACING_SM);
-
-        // 副标题
-        ui.label(
             RichText::new("简洁、快速、安全的数据库管理工具")
-                .size(14.0)
+                .size(16.0)
                 .color(GRAY)
         );
 
@@ -78,22 +100,17 @@ impl Welcome {
     }
 
     /// 显示数据库类型卡片
-    fn show_database_cards(ui: &mut egui::Ui, available_width: f32) {
+    fn show_database_cards(ui: &mut egui::Ui) {
         let card_width = 130.0;
         let card_spacing = 16.0;
-        let total_cards_width = card_width * 3.0 + card_spacing * 2.0;
 
         ui.horizontal(|ui| {
-            // 居中对齐
-            let left_padding = (available_width - total_cards_width) / 2.0;
-            ui.add_space(left_padding.max(0.0));
-
             ui.spacing_mut().item_spacing.x = card_spacing;
 
             // SQLite 卡片
             Self::database_card(
                 ui,
-                "🗃️",
+                &['\u{25A1}', '\u{25A1}'],  // 方块图案
                 "SQLite",
                 "本地文件数据库",
                 Color32::from_rgb(80, 160, 220),
@@ -103,7 +120,7 @@ impl Welcome {
             // PostgreSQL 卡片
             Self::database_card(
                 ui,
-                "🐘",
+                &['\u{229E}'],  // 方块加号
                 "PostgreSQL",
                 "企业级关系数据库",
                 Color32::from_rgb(80, 130, 180),
@@ -113,7 +130,7 @@ impl Welcome {
             // MySQL 卡片
             Self::database_card(
                 ui,
-                "🐬",
+                &['\u{2662}'],  // 菱形
                 "MySQL",
                 "流行的开源数据库",
                 Color32::from_rgb(240, 150, 80),
@@ -125,7 +142,7 @@ impl Welcome {
     /// 单个数据库卡片
     fn database_card(
         ui: &mut egui::Ui,
-        icon: &str,
+        icon_chars: &[char],
         name: &str,
         desc: &str,
         accent_color: Color32,
@@ -154,8 +171,9 @@ impl Welcome {
                 ui.set_max_width(width - 32.0);
 
                 ui.vertical_centered(|ui| {
-                    // 图标
-                    ui.label(RichText::new(icon).size(28.0));
+                    // 图标 - 使用简单的字符
+                    let icon_text: String = icon_chars.iter().collect();
+                    ui.label(RichText::new(icon_text).size(28.0).color(accent_color));
 
                     ui.add_space(SPACING_SM);
 
@@ -191,7 +209,7 @@ impl Welcome {
             .inner_margin(egui::Margin::symmetric(24.0, 12.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("💡").size(16.0));
+                    ui.label(RichText::new("\u{2139}").size(16.0).color(SUCCESS));  // info 符号
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new("点击侧边栏的")
@@ -219,7 +237,7 @@ impl Welcome {
     fn show_shortcuts(ui: &mut egui::Ui) {
         // 标题
         ui.label(
-            RichText::new("⌨️ 常用快捷键")
+            RichText::new("\u{2328} 常用快捷键")  // 键盘符号
                 .size(14.0)
                 .strong()
                 .color(GRAY)

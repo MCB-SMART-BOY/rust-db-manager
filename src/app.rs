@@ -8,8 +8,9 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
 use crate::core::{
-    export_to_csv, export_to_json, export_to_sql, format_sql, import_sql_file, AppConfig,
-    AutoComplete, ExportFormat, HighlightColors, QueryHistory, ThemeManager, ThemePreset,
+    constants, export_to_csv, export_to_json, export_to_sql, format_sql, import_sql_file,
+    AppConfig, AutoComplete, ExportFormat, HighlightColors, QueryHistory, ThemeManager,
+    ThemePreset,
 };
 use crate::database::{
     connect_database, execute_query, get_tables_for_database, ConnectResult,
@@ -115,10 +116,18 @@ pub struct DbManagerApp {
 impl DbManagerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let (tx, rx) = channel();
+        
+        // 创建 tokio runtime，优先多线程，失败则降级到单线程
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("Failed to create tokio runtime");
+            .or_else(|e| {
+                eprintln!("[warn] 多线程运行时创建失败: {}，降级到单线程模式", e);
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+            })
+            .expect("无法创建 tokio 运行时，系统资源可能不足");
 
         // 加载配置
         let app_config = AppConfig::load();
@@ -131,7 +140,7 @@ impl DbManagerApp {
 
         // 获取基础 DPI 缩放并应用用户缩放设置
         let base_pixels_per_point = cc.egui_ctx.pixels_per_point();
-        let ui_scale = app_config.ui_scale.clamp(0.5, 2.0);
+        let ui_scale = app_config.ui_scale.clamp(constants::ui::UI_SCALE_MIN, constants::ui::UI_SCALE_MAX);
         cc.egui_ctx.set_pixels_per_point(base_pixels_per_point * ui_scale);
 
         // 从配置恢复连接
@@ -175,9 +184,9 @@ impl DbManagerApp {
             autocomplete: AutoComplete::new(),
             show_autocomplete: false,
             selected_completion: 0,
-            show_sql_editor: true,
+            show_sql_editor: false,
             focus_sql_editor: false,
-            show_sidebar: true,
+            show_sidebar: false,
             show_help: false,
             help_scroll_offset: 0.0,
             ui_scale,
@@ -187,11 +196,18 @@ impl DbManagerApp {
 
     /// 设置 UI 缩放比例
     fn set_ui_scale(&mut self, ctx: &egui::Context, scale: f32) {
-        let scale = scale.clamp(0.5, 2.0);
+        let scale = scale.clamp(constants::ui::UI_SCALE_MIN, constants::ui::UI_SCALE_MAX);
         self.ui_scale = scale;
         self.app_config.ui_scale = scale;
         ctx.set_pixels_per_point(self.base_pixels_per_point * scale);
         let _ = self.app_config.save();
+    }
+
+    /// 检查当前连接是否是 MySQL（用于选择 SQL 引号类型）
+    fn is_mysql(&self) -> bool {
+        self.manager.get_active()
+            .map(|c| matches!(c.config.db_type, crate::database::DatabaseType::MySQL))
+            .unwrap_or(false)
     }
 
     fn set_theme(&mut self, ctx: &egui::Context, preset: ThemePreset) {
@@ -250,21 +266,24 @@ impl DbManagerApp {
 
             self.runtime.spawn(async move {
                 use tokio::time::{timeout, Duration};
-                // 30秒连接超时
-                let result = timeout(Duration::from_secs(30), connect_database(&config)).await;
-                match result {
+                // 连接超时
+                let result = timeout(Duration::from_secs(constants::database::CONNECTION_TIMEOUT_SECS), connect_database(&config)).await;
+                let message = match result {
                     Ok(Ok(ConnectResult::Tables(tables))) => {
-                        tx.send(Message::ConnectedWithTables(name, Ok(tables))).ok();
+                        Message::ConnectedWithTables(name, Ok(tables))
                     }
                     Ok(Ok(ConnectResult::Databases(databases))) => {
-                        tx.send(Message::ConnectedWithDatabases(name, Ok(databases))).ok();
+                        Message::ConnectedWithDatabases(name, Ok(databases))
                     }
                     Ok(Err(e)) => {
-                        tx.send(Message::ConnectedWithTables(name, Err(e.to_string()))).ok();
+                        Message::ConnectedWithTables(name, Err(e.to_string()))
                     }
                     Err(_) => {
-                        tx.send(Message::ConnectedWithTables(name, Err("连接超时".to_string()))).ok();
+                        Message::ConnectedWithTables(name, Err("连接超时".to_string()))
                     }
+                };
+                if tx.send(message).is_err() {
+                    eprintln!("[warn] 无法发送连接结果：接收端已关闭");
                 }
             });
         }
@@ -282,7 +301,7 @@ impl DbManagerApp {
                 self.runtime.spawn(async move {
                     use tokio::time::{timeout, Duration};
                     let result = timeout(
-                        Duration::from_secs(30),
+                        Duration::from_secs(constants::database::CONNECTION_TIMEOUT_SECS),
                         get_tables_for_database(&config, &database),
                     )
                     .await;
@@ -291,7 +310,9 @@ impl DbManagerApp {
                         Ok(Err(e)) => Err(e.to_string()),
                         Err(_) => Err("获取表列表超时".to_string()),
                     };
-                    tx.send(Message::DatabaseSelected(active_name, database, tables_result)).ok();
+                    if tx.send(Message::DatabaseSelected(active_name, database, tables_result)).is_err() {
+                        eprintln!("[warn] 无法发送数据库选择结果：接收端已关闭");
+                    }
                 });
             }
         }
@@ -334,8 +355,8 @@ impl DbManagerApp {
                 // 添加到命令历史
                 if self.command_history.first() != Some(&sql) {
                     self.command_history.insert(0, sql.clone());
-                    // 限制每个连接最多保存100条历史记录
-                    if self.command_history.len() > 100 {
+                    // 限制每个连接最多保存历史记录
+                    if self.command_history.len() > constants::history::MAX_COMMAND_HISTORY_PER_CONNECTION {
                         self.command_history.pop();
                     }
                     // 保存历史记录到配置文件
@@ -351,15 +372,17 @@ impl DbManagerApp {
                 self.runtime.spawn(async move {
                     use tokio::time::{timeout, Duration};
                     let start = Instant::now();
-                    // 查询超时 5 分钟
-                    let result = timeout(Duration::from_secs(300), execute_query(&config, &sql)).await;
+                    // 查询超时
+                    let result = timeout(Duration::from_secs(constants::database::QUERY_TIMEOUT_SECS), execute_query(&config, &sql)).await;
                     let elapsed_ms = start.elapsed().as_millis() as u64;
                     let query_result = match result {
                         Ok(Ok(res)) => Ok(res),
                         Ok(Err(e)) => Err(e.to_string()),
                         Err(_) => Err("查询超时".to_string()),
                     };
-                    tx.send(Message::QueryDone(sql, query_result, elapsed_ms)).ok();
+                    if tx.send(Message::QueryDone(sql, query_result, elapsed_ms)).is_err() {
+                        eprintln!("[warn] 无法发送查询结果：接收端已关闭");
+                    }
                 });
             }
         } else {
@@ -454,7 +477,14 @@ impl DbManagerApp {
                         .unwrap_or_default();
 
                     match result {
-                        Ok(res) => {
+                        Ok(mut res) => {
+                            // 限制结果集大小，防止内存溢出
+                            let original_rows = res.rows.len();
+                            let was_truncated = original_rows > constants::database::MAX_RESULT_SET_ROWS;
+                            if was_truncated {
+                                res.rows.truncate(constants::database::MAX_RESULT_SET_ROWS);
+                            }
+
                             self.query_history.add(
                                 sql,
                                 db_type,
@@ -470,6 +500,11 @@ impl DbManagerApp {
                                 self.last_message = Some(format!(
                                     "执行成功，影响 {} 行 ({}ms)",
                                     res.affected_rows, elapsed_ms
+                                ));
+                            } else if was_truncated {
+                                self.last_message = Some(format!(
+                                    "查询完成，返回 {} 行（已截断，原始 {} 行）({}ms)",
+                                    res.rows.len(), original_rows, elapsed_ms
                                 ));
                             } else {
                                 self.last_message = Some(format!(
@@ -979,8 +1014,10 @@ impl eframe::App for DbManagerApp {
 
                     if let Some(table) = &self.selected_table {
                         if ui.button(format!("查询表 {} 的数据", table)).clicked() {
-                            self.sql = format!("SELECT * FROM {} LIMIT 100;", table);
-                            sql_editor_actions.execute = true;
+                            if let Ok(quoted_table) = ui::quote_identifier(table, self.is_mysql()) {
+                                self.sql = format!("SELECT * FROM {} LIMIT {};", quoted_table, constants::database::DEFAULT_QUERY_LIMIT);
+                                sql_editor_actions.execute = true;
+                            }
                         }
                     }
                 });
@@ -1026,8 +1063,10 @@ impl eframe::App for DbManagerApp {
         // 处理表切换
         if let Some(table_name) = toolbar_actions.switch_table {
             self.selected_table = Some(table_name.clone());
-            let query_sql = format!("SELECT * FROM {} LIMIT 100;", table_name);
-            self.execute(query_sql);
+            if let Ok(quoted_table) = ui::quote_identifier(&table_name, self.is_mysql()) {
+                let query_sql = format!("SELECT * FROM {} LIMIT {};", quoted_table, constants::database::DEFAULT_QUERY_LIMIT);
+                self.execute(query_sql);
+            }
             // 切换表后清空编辑区，不残留自动生成的查询语句
             self.sql.clear();
         }
@@ -1105,21 +1144,28 @@ impl eframe::App for DbManagerApp {
             self.selected_table = Some(table.clone());
             // 根据数据库类型生成查看表结构的 SQL
             if let Some(conn) = self.manager.get_active() {
+                // 对于 PRAGMA 和 information_schema 查询，表名作为字符串参数更安全
                 let schema_sql = match conn.config.db_type {
                     crate::database::DatabaseType::SQLite => {
-                        format!("PRAGMA table_info('{}');", table)
+                        // SQLite PRAGMA 使用单引号包裹的字符串
+                        let escaped = table.replace('\'', "''");
+                        format!("PRAGMA table_info('{}');", escaped)
                     }
                     crate::database::DatabaseType::PostgreSQL => {
+                        // PostgreSQL information_schema 使用字符串参数
+                        let escaped = table.replace('\'', "''");
                         format!(
                             "SELECT column_name, data_type, is_nullable, column_default \
                              FROM information_schema.columns \
                              WHERE table_name = '{}' \
                              ORDER BY ordinal_position;",
-                            table
+                            escaped
                         )
                     }
                     crate::database::DatabaseType::MySQL => {
-                        format!("DESCRIBE `{}`;", table)
+                        // MySQL DESCRIBE 使用反引号，同时禁止点号防止跨库访问
+                        let escaped = table.replace('`', "``").replace('.', "_");
+                        format!("DESCRIBE `{}`;", escaped)
                     }
                 };
                 self.execute(schema_sql);
@@ -1131,8 +1177,10 @@ impl eframe::App for DbManagerApp {
         // 处理查询表数据（从侧边栏双击表）
         if let Some(table) = sidebar_actions.query_table {
             self.selected_table = Some(table.clone());
-            let query_sql = format!("SELECT * FROM {} LIMIT 100;", table);
-            self.execute(query_sql);
+            if let Ok(quoted_table) = ui::quote_identifier(&table, self.is_mysql()) {
+                let query_sql = format!("SELECT * FROM {} LIMIT {};", quoted_table, constants::database::DEFAULT_QUERY_LIMIT);
+                self.execute(query_sql);
+            }
             // 不在编辑区残留自动生成的查询语句
             self.sql.clear();
         }
@@ -1172,5 +1220,10 @@ impl eframe::App for DbManagerApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save_config();
+        
+        // 清理连接池，确保所有数据库连接正确关闭
+        self.runtime.block_on(async {
+            crate::database::POOL_MANAGER.clear_all().await;
+        });
     }
 }

@@ -1,5 +1,6 @@
+use crate::core::constants;
 use crate::ui::styles::GRAY;
-use egui::{self, RichText, TextEdit};
+use egui::{self, Color32, RichText, TextEdit};
 
 pub struct SearchBar;
 
@@ -56,11 +57,28 @@ impl SearchBar {
             // 结果统计
             if let Some((filtered, total)) = result_count {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // 大结果集警告
+                    let is_large = total >= constants::database::LARGE_RESULT_SET_WARNING_THRESHOLD;
+                    let warning_color = Color32::from_rgb(255, 180, 80);
+                    
+                    if is_large {
+                        ui.label(
+                            RichText::new("⚠ 大数据集")
+                                .small()
+                                .color(warning_color),
+                        ).on_hover_text(format!(
+                            "结果集超过 {} 行，可能影响性能。\n建议添加 LIMIT 或 WHERE 条件缩小范围。",
+                            constants::database::LARGE_RESULT_SET_WARNING_THRESHOLD
+                        ));
+                        ui.add_space(8.0);
+                    }
+                    
                     if filtered == total {
+                        let color = if is_large { warning_color } else { GRAY };
                         ui.label(
                             RichText::new(format!("共 {} 行", total))
                                 .small()
-                                .color(GRAY),
+                                .color(color),
                         );
                     } else {
                         ui.label(

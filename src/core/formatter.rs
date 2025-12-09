@@ -54,8 +54,17 @@ pub fn format_sql(sql: &str) -> String {
     let upper = normalized.to_uppercase();
     let chars: Vec<char> = normalized.chars().collect();
     let mut i = 0;
+    
+    // 安全计数器，防止无限循环（最多处理字符数的2倍迭代）
+    let max_iterations = chars.len() * 2 + 1;
+    let mut iterations = 0;
 
     while i < chars.len() {
+        iterations += 1;
+        if iterations > max_iterations {
+            eprintln!("[warn] SQL 格式化器达到最大迭代次数，返回原始SQL");
+            return sql.to_string();
+        }
         let c = chars[i];
 
         // 处理字符串

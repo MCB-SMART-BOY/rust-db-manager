@@ -2,6 +2,8 @@
 
 #![allow(dead_code)] // 预留 API
 
+use super::constants::autocomplete as consts;
+
 /// SQL 关键字列表
 const SQL_KEYWORDS: &[&str] = &[
     "SELECT",
@@ -235,14 +237,23 @@ impl AutoComplete {
         }
     }
 
-    /// 更新表列表
+    /// 更新表列表（限制最大数量）
     pub fn set_tables(&mut self, tables: Vec<String>) {
-        self.tables = tables;
+        self.tables = if tables.len() > consts::MAX_CACHED_TABLES {
+            tables.into_iter().take(consts::MAX_CACHED_TABLES).collect()
+        } else {
+            tables
+        };
     }
 
-    /// 添加表的列信息
+    /// 添加表的列信息（限制最大数量）
     pub fn set_columns(&mut self, table: String, columns: Vec<String>) {
-        self.columns.insert(table, columns);
+        let limited_columns = if columns.len() > consts::MAX_CACHED_COLUMNS_PER_TABLE {
+            columns.into_iter().take(consts::MAX_CACHED_COLUMNS_PER_TABLE).collect()
+        } else {
+            columns
+        };
+        self.columns.insert(table, limited_columns);
     }
 
     /// 清空所有信息
@@ -341,7 +352,7 @@ impl AutoComplete {
         });
 
         // 限制返回数量
-        completions.truncate(15);
+        completions.truncate(consts::MAX_COMPLETIONS);
         completions
     }
 

@@ -1,5 +1,6 @@
 //! 侧边栏组件 - 连接管理和表列表
 
+use crate::core::constants;
 use crate::database::ConnectionManager;
 use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_MD, SPACING_SM, SPACING_LG};
 use egui::{self, Color32, RichText, Rounding, Vec2};
@@ -54,9 +55,9 @@ impl Sidebar {
 
         // 根据屏幕宽度按比例设置侧边栏宽度
         let screen_width = ctx.screen_rect().width();
-        let default_width = (screen_width * 0.18).clamp(200.0, 300.0);
-        let min_width = (screen_width * 0.12).clamp(180.0, 220.0);
-        let max_width = (screen_width * 0.25).clamp(250.0, 380.0);
+        let default_width = (screen_width * constants::ui::SIDEBAR_DEFAULT_WIDTH_RATIO).clamp(200.0, 300.0);
+        let min_width = (screen_width * constants::ui::SIDEBAR_MIN_WIDTH_RATIO).clamp(constants::ui::SIDEBAR_MIN_WIDTH_PX, 220.0);
+        let max_width = (screen_width * constants::ui::SIDEBAR_MAX_WIDTH_RATIO).clamp(250.0, constants::ui::SIDEBAR_MAX_WIDTH_PX);
 
         egui::SidePanel::left("sidebar")
             .default_width(default_width)
@@ -283,13 +284,15 @@ impl Sidebar {
     }
 
     /// 连接头部文本
+    /// 使用图标+颜色双重指示，对色盲友好
     fn connection_header_text(name: &str, is_active: bool, is_connected: bool) -> RichText {
+        // 使用不同形状的图标来区分状态，而不仅依赖颜色
         let (icon, color) = if is_active && is_connected {
-            ("●", SUCCESS)
+            ("◆", SUCCESS)  // 实心菱形表示活跃连接
         } else if is_connected {
-            ("○", Color32::from_rgb(100, 180, 100))
+            ("◇", Color32::from_rgb(100, 180, 100))  // 空心菱形表示已连接但非活跃
         } else {
-            ("○", GRAY)
+            ("○", GRAY)  // 空心圆表示未连接
         };
 
         RichText::new(format!("{} {}", icon, name))

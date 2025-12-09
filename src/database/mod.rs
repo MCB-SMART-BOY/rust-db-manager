@@ -14,14 +14,51 @@ use tokio::sync::RwLock;
 
 /// 数据库操作错误
 #[derive(Error, Debug)]
+#[allow(dead_code)] // 预留错误类型供将来使用
 pub enum DbError {
     #[error("连接错误: {0}")]
     Connection(String),
+    #[error("连接错误 [{db_type}]: {message}")]
+    ConnectionTyped {
+        db_type: String,
+        message: String,
+    },
     #[error("查询错误: {0}")]
     Query(String),
+    #[error("查询错误 [{db_type}]: {message}\nSQL: {sql}")]
+    QueryWithContext {
+        db_type: String,
+        message: String,
+        sql: String,
+    },
     #[error("连接池错误: {0}")]
-    #[allow(dead_code)]
     Pool(String),
+}
+
+#[allow(dead_code)] // 预留函数供将来使用
+impl DbError {
+    /// 创建带数据库类型的连接错误
+    pub fn connection_typed(db_type: &DatabaseType, message: impl Into<String>) -> Self {
+        Self::ConnectionTyped {
+            db_type: db_type.display_name().to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// 创建带上下文的查询错误
+    pub fn query_with_context(db_type: &DatabaseType, message: impl Into<String>, sql: &str) -> Self {
+        // 截断 SQL 以避免日志过长
+        let sql_preview = if sql.len() > 200 {
+            format!("{}...", &sql[..200])
+        } else {
+            sql.to_string()
+        };
+        Self::QueryWithContext {
+            db_type: db_type.display_name().to_string(),
+            message: message.into(),
+            sql: sql_preview,
+        }
+    }
 }
 
 // ============================================================================
@@ -93,26 +130,183 @@ pub struct ConnectionConfig {
     pub database: String,
 }
 
-/// 将密码编码为 base64 存储
+/// 获取机器特定的加密密钥
+/// 使用 hostname 作为密钥派生的基础，确保配置文件在不同机器上不可直接读取
+/// 同时保证用户迁移目录后仍能解密
+fn get_machine_key() -> [u8; 32] {
+    use ring::digest::{digest, SHA256};
+    
+    // 使用机器标识信息来派生密钥（更稳定，不受用户目录变化影响）
+    let mut key_material = String::new();
+    
+    // 使用 hostname（跨平台，更稳定）
+    if let Ok(hostname) = hostname::get() {
+        key_material.push_str(&hostname.to_string_lossy());
+    }
+    
+    // 备用：使用用户名（如果 hostname 获取失败）
+    if key_material.is_empty() {
+        if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
+            key_material.push_str(&user);
+        }
+    }
+    
+    // 添加固定盐值（带版本号，便于未来升级）
+    key_material.push_str("rust-db-manager-v2");
+    
+    let hash = digest(&SHA256, key_material.as_bytes());
+    let mut key = [0u8; 32];
+    key.copy_from_slice(hash.as_ref());
+    key
+}
+
+/// 获取旧版机器密钥（使用用户目录路径，用于向后兼容）
+fn get_legacy_machine_key() -> [u8; 32] {
+    use ring::digest::{digest, SHA256};
+    
+    let mut key_material = String::new();
+    
+    // 旧版使用配置目录路径
+    if let Some(config_dir) = dirs::config_dir() {
+        key_material.push_str(&config_dir.to_string_lossy());
+    }
+    
+    // 备用：使用用户名
+    if key_material.is_empty() {
+        if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
+            key_material.push_str(&user);
+        }
+    }
+    
+    // 旧版盐值
+    key_material.push_str("rust-db-manager-v2");
+    
+    let hash = digest(&SHA256, key_material.as_bytes());
+    let mut key = [0u8; 32];
+    key.copy_from_slice(hash.as_ref());
+    key
+}
+
+/// 使用 AES-GCM 加密密码
+fn encrypt_password(password: &str) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+    use ring::rand::{SecureRandom, SystemRandom};
+    
+    if password.is_empty() {
+        return Ok(String::new());
+    }
+    
+    let key_bytes = get_machine_key();
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)
+        .map_err(|_| "Failed to create encryption key")?;
+    let key = LessSafeKey::new(unbound_key);
+    
+    // 生成随机 nonce
+    let rng = SystemRandom::new();
+    let mut nonce_bytes = [0u8; 12];
+    rng.fill(&mut nonce_bytes)
+        .map_err(|_| "Failed to generate nonce")?;
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    
+    // 加密
+    let mut in_out = password.as_bytes().to_vec();
+    key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+        .map_err(|_| "Encryption failed")?;
+    
+    // 将 nonce 和密文组合后 base64 编码
+    let mut result = nonce_bytes.to_vec();
+    result.extend(in_out);
+    
+    // 添加版本前缀以区分加密格式
+    Ok(format!("v1:{}", STANDARD.encode(&result)))
+}
+
+/// 使用指定密钥尝试解密
+fn try_decrypt_with_key(combined: &[u8], key_bytes: [u8; 32]) -> Result<String, String> {
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+    
+    if combined.len() < 12 + 16 {
+        return Err("Invalid encrypted data".to_string());
+    }
+    
+    let (nonce_bytes, ciphertext) = combined.split_at(12);
+    let mut nonce_arr = [0u8; 12];
+    nonce_arr.copy_from_slice(nonce_bytes);
+    let nonce = Nonce::assume_unique_for_key(nonce_arr);
+    
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes)
+        .map_err(|_| "Failed to create decryption key")?;
+    let key = LessSafeKey::new(unbound_key);
+    
+    let mut in_out = ciphertext.to_vec();
+    let plaintext = key.open_in_place(nonce, Aad::empty(), &mut in_out)
+        .map_err(|_| "Decryption failed")?;
+    
+    String::from_utf8(plaintext.to_vec())
+        .map_err(|_| "Invalid UTF-8 in decrypted password".to_string())
+}
+
+/// 解密密码
+fn decrypt_password(encrypted: &str) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    
+    if encrypted.is_empty() {
+        return Ok(String::new());
+    }
+    
+    // 检查版本前缀
+    if let Some(data) = encrypted.strip_prefix("v1:") {
+        // 新版加密格式
+        let combined = STANDARD.decode(data)
+            .map_err(|_| "Invalid base64 encoding")?;
+        
+        // 首先尝试使用新密钥（hostname）解密
+        if let Ok(password) = try_decrypt_with_key(&combined, get_machine_key()) {
+            return Ok(password);
+        }
+        
+        // 如果失败，尝试使用旧密钥（用户目录路径）解密
+        if let Ok(password) = try_decrypt_with_key(&combined, get_legacy_machine_key()) {
+            // 使用旧密钥解密成功，密码将在下次保存时用新密钥重新加密
+            return Ok(password);
+        }
+        
+        Err("Decryption failed - password may have been encrypted on different machine".to_string())
+    } else {
+        // 尝试旧版 base64 格式（向后兼容）
+        match STANDARD.decode(encrypted) {
+            Ok(bytes) => String::from_utf8(bytes)
+                .map_err(|_| "Invalid UTF-8 in password".to_string()),
+            Err(_) => {
+                // 可能是非常老的明文密码
+                Ok(encrypted.to_string())
+            }
+        }
+    }
+}
+
+/// 将密码加密后存储
 fn encode_password<S>(password: &String, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::ser::Error;
+    
     if password.is_empty() {
         serializer.serialize_str("")
     } else {
-        let encoded = STANDARD.encode(password.as_bytes());
-        serializer.serialize_str(&encoded)
+        let encrypted = encrypt_password(password)
+            .map_err(|e| S::Error::custom(e))?;
+        serializer.serialize_str(&encrypted)
     }
 }
 
-/// 从 base64 解码密码
+/// 解密密码
 fn decode_password<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    use base64::{engine::general_purpose::STANDARD, Engine};
     use serde::de::Error;
 
     let s: String = String::deserialize(deserializer)?;
@@ -120,15 +314,8 @@ where
         return Ok(String::new());
     }
 
-    // 尝试 base64 解码，如果失败则假设是旧版明文密码
-    match STANDARD.decode(&s) {
-        Ok(bytes) => String::from_utf8(bytes)
-            .map_err(|e| D::Error::custom(format!("Invalid UTF-8 in password: {}", e))),
-        Err(_) => {
-            // 可能是旧版本的明文密码，直接返回
-            Ok(s)
-        }
-    }
+    decrypt_password(&s)
+        .map_err(|e| D::Error::custom(e))
 }
 
 impl ConnectionConfig {
@@ -181,15 +368,37 @@ impl ConnectionConfig {
         }
     }
 
-    /// 生成唯一的连接标识符（用于连接池缓存，按用户+主机区分）
+    /// 生成唯一的连接标识符（用于连接池缓存，按用户+主机+数据库区分）
     pub fn pool_key(&self) -> String {
         match self.db_type {
             DatabaseType::SQLite => format!("sqlite:{}", self.database),
             DatabaseType::PostgreSQL => {
-                format!("pg:{}:{}:{}", self.host, self.port, self.username)
+                // 包含数据库名，确保不同数据库使用不同连接
+                format!("pg:{}:{}:{}:{}", self.host, self.port, self.username, self.database)
             }
             DatabaseType::MySQL => {
-                format!("mysql:{}:{}:{}", self.host, self.port, self.username)
+                // 包含数据库名，确保不同数据库使用不同连接
+                format!("mysql:{}:{}:{}:{}", self.host, self.port, self.username, self.database)
+            }
+        }
+    }
+
+    /// 生成安全的连接字符串描述（密码遮蔽，用于日志）
+    #[allow(dead_code)]
+    pub fn connection_string_masked(&self) -> String {
+        match self.db_type {
+            DatabaseType::SQLite => format!("sqlite://{}", self.database),
+            DatabaseType::PostgreSQL => {
+                format!(
+                    "postgres://{}:****@{}:{}/{}",
+                    self.username, self.host, self.port, self.database
+                )
+            }
+            DatabaseType::MySQL => {
+                format!(
+                    "mysql://{}:****@{}:{}/{}",
+                    self.username, self.host, self.port, self.database
+                )
             }
         }
     }
@@ -265,7 +474,8 @@ impl Connection {
 
     /// 设置选中的数据库及其表列表
     pub fn set_database(&mut self, database: String, tables: Vec<String>) {
-        self.selected_database = Some(database);
+        self.selected_database = Some(database.clone());
+        self.config.database = database;
         self.tables = tables;
     }
 
@@ -390,8 +600,19 @@ impl PoolManager {
             }
         }
 
-        // 创建新连接池
-        let pool = mysql_async::Pool::new(config.connection_string().as_str());
+        // 创建新连接池，配置连接池参数（最小2，最大10连接）
+        let pool_opts = mysql_async::PoolOpts::default()
+            .with_constraints(
+                mysql_async::PoolConstraints::new(2, 10)
+                    .expect("连接池约束无效")
+            );
+        
+        let opts = mysql_async::OptsBuilder::from_opts(
+            mysql_async::Opts::from_url(config.connection_string().as_str())
+                .map_err(|e| DbError::Connection(format!("MySQL URL 解析失败: {}", e)))?
+        ).pool_opts(pool_opts);
+        
+        let pool = mysql_async::Pool::new(opts);
 
         // 测试连接
         let _conn = pool.get_conn().await.map_err(|e| {
@@ -431,10 +652,12 @@ impl PoolManager {
                 .await
                 .map_err(|e| DbError::Connection(format!("PostgreSQL 连接失败: {}", e)))?;
 
-        // 在后台处理连接
+        // 在后台处理连接（tokio_postgres 要求）
+        // 连接任务会在客户端关闭或出错时自动终止
+        let conn_key = key.clone();
         tokio::spawn(async move {
             if let Err(e) = conn.await {
-                eprintln!("PostgreSQL 连接错误: {}", e);
+                eprintln!("[warn] PostgreSQL 连接 '{}' 错误: {}", conn_key, e);
             }
         });
 
@@ -505,4 +728,5 @@ lazy_static::lazy_static! {
 
 mod query;
 
-pub use query::{connect_database, execute_query, get_tables_for_database, ConnectResult};
+#[allow(unused_imports)] // get_primary_key_column 预留供将来使用
+pub use query::{connect_database, execute_query, get_tables_for_database, get_primary_key_column, ConnectResult};

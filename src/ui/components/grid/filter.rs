@@ -387,12 +387,31 @@ pub fn show_filter_bar(ui: &mut egui::Ui, result: &QueryResult, state: &mut Data
 
                             // 值输入
                             if filter.operator.needs_value() {
-                                ui.add(
+                                // 检查正则表达式错误
+                                let regex_error = if filter.operator == FilterOperator::Regex {
+                                    validate_regex(&filter.value)
+                                } else {
+                                    None
+                                };
+                                
+                                let text_color = if regex_error.is_some() {
+                                    Color32::from_rgb(255, 100, 100)
+                                } else {
+                                    Color32::WHITE
+                                };
+                                
+                                let response = ui.add(
                                     TextEdit::singleline(&mut filter.value)
                                         .desired_width(120.0)
                                         .font(egui::TextStyle::Small)
+                                        .text_color(text_color)
                                         .hint_text(filter.operator.value_hint()),
                                 );
+                                
+                                // 显示正则错误提示
+                                if let Some(err) = regex_error {
+                                    response.on_hover_text(RichText::new(err).color(Color32::from_rgb(255, 100, 100)));
+                                }
 
                                 // 第二个值（BETWEEN）
                                 if filter.operator.needs_second_value() {
@@ -760,9 +779,20 @@ fn check_filter_condition(cell: &str, filter: &ColumnFilter) -> bool {
         FilterOperator::IsEmpty => cell.is_empty() || cell == "NULL",
         FilterOperator::IsNotEmpty => !cell.is_empty() && cell != "NULL",
         
-        FilterOperator::Regex => regex::Regex::new(&filter.value)
-            .map(|re| re.is_match(cell))
-            .unwrap_or(false),
+        FilterOperator::Regex => {
+            // 限制正则表达式长度和复杂度，防止 ReDoS 攻击
+            if filter.value.len() > 100 {
+                false  // 正则表达式过长，拒绝执行（错误在 UI 层显示）
+            } else {
+                match regex::RegexBuilder::new(&filter.value)
+                    .size_limit(1024 * 10)  // 限制编译后大小为 10KB
+                    .build()
+                {
+                    Ok(re) => re.is_match(cell),
+                    Err(_) => false,  // 正则错误在 validate_regex 中处理
+                }
+            }
+        }
     }
 }
 
@@ -785,6 +815,23 @@ fn truncate_display(s: &str, max_len: usize) -> String {
         format!("{}...", &s[..max_len])
     } else {
         s.to_string()
+    }
+}
+
+/// 验证正则表达式，返回错误信息（如果有）
+pub fn validate_regex(pattern: &str) -> Option<String> {
+    if pattern.is_empty() {
+        return None;
+    }
+    if pattern.len() > 100 {
+        return Some("正则表达式过长 (最大100字符)".to_string());
+    }
+    match regex::RegexBuilder::new(pattern)
+        .size_limit(1024 * 10)
+        .build()
+    {
+        Ok(_) => None,
+        Err(e) => Some(format!("正则错误: {}", e)),
     }
 }
 

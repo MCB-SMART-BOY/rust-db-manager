@@ -56,6 +56,8 @@ pub fn export_to_csv(result: &QueryResult, path: &Path) -> Result<(), String> {
 pub fn export_to_sql(result: &QueryResult, table_name: &str, path: &Path) -> Result<(), String> {
     let mut file = File::create(path).map_err(|e| e.to_string())?;
 
+    let escaped_table_name = escape_sql_identifier(table_name);
+    
     writeln!(file, "-- Exported from Rust DB Manager").map_err(|e| e.to_string())?;
     writeln!(file, "-- Table: {}", table_name).map_err(|e| e.to_string())?;
     writeln!(file, "-- Rows: {}\n", result.rows.len()).map_err(|e| e.to_string())?;
@@ -68,7 +70,7 @@ pub fn export_to_sql(result: &QueryResult, table_name: &str, path: &Path) -> Res
     let columns_str = result
         .columns
         .iter()
-        .map(|c| format!("`{}`", c))
+        .map(|c| format!("`{}`", escape_sql_identifier(c)))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -88,7 +90,7 @@ pub fn export_to_sql(result: &QueryResult, table_name: &str, path: &Path) -> Res
         writeln!(
             file,
             "INSERT INTO `{}` ({}) VALUES ({});",
-            table_name, columns_str, values
+            escaped_table_name, columns_str, values
         )
         .map_err(|e| e.to_string())?;
     }
@@ -135,6 +137,11 @@ fn escape_csv_field(field: &str) -> String {
     } else {
         field.to_string()
     }
+}
+
+/// 转义 SQL 标识符（表名、列名）中的反引号
+fn escape_sql_identifier(name: &str) -> String {
+    name.replace('`', "``")
 }
 
 pub fn import_sql_file(path: &Path) -> Result<String, String> {

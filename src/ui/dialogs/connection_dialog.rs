@@ -3,6 +3,86 @@
 use crate::database::{ConnectionConfig, DatabaseType};
 use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD, SPACING_LG};
 use egui::{self, Color32, RichText, Rounding, TextEdit};
+use std::path::Path;
+
+/// 输入验证结果
+struct ValidationResult {
+    is_valid: bool,
+    errors: Vec<String>,
+}
+
+impl ValidationResult {
+    fn new() -> Self {
+        Self {
+            is_valid: true,
+            errors: Vec::new(),
+        }
+    }
+
+    fn add_error(&mut self, error: impl Into<String>) {
+        self.is_valid = false;
+        self.errors.push(error.into());
+    }
+}
+
+/// 验证连接配置
+fn validate_config(config: &ConnectionConfig) -> ValidationResult {
+    let mut result = ValidationResult::new();
+
+    // 验证连接名称
+    if config.name.is_empty() {
+        result.add_error("连接名称不能为空");
+    } else if config.name.len() > 64 {
+        result.add_error("连接名称不能超过 64 个字符");
+    }
+
+    match config.db_type {
+        DatabaseType::SQLite => {
+            // SQLite 验证
+            if config.database.is_empty() {
+                result.add_error("数据库文件路径不能为空");
+            } else {
+                let path = Path::new(&config.database);
+                // 检查父目录是否存在
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() && !parent.exists() {
+                        result.add_error(format!("目录不存在: {}", parent.display()));
+                    }
+                }
+                // 检查文件扩展名
+                if let Some(ext) = path.extension() {
+                    let ext_lower = ext.to_string_lossy().to_lowercase();
+                    if !["db", "sqlite", "sqlite3", "s3db"].contains(&ext_lower.as_str()) {
+                        // 只是警告，不阻止保存
+                    }
+                }
+            }
+        }
+        DatabaseType::PostgreSQL | DatabaseType::MySQL => {
+            // 主机验证
+            if config.host.is_empty() {
+                result.add_error("主机地址不能为空");
+            } else if config.host.contains(' ') {
+                result.add_error("主机地址不能包含空格");
+            } else if config.host.len() > 255 {
+                result.add_error("主机地址过长");
+            }
+
+            // 端口验证（u16 类型范围已确保 0-65535）
+            if config.port == 0 {
+                result.add_error("端口号不能为 0");
+            }
+            // 注: 小于 1024 的端口是系统保留端口，但某些数据库可能使用
+
+            // 用户名验证（可选但推荐）
+            if config.username.len() > 128 {
+                result.add_error("用户名过长");
+            }
+        }
+    }
+
+    result
+}
 
 pub struct ConnectionDialog;
 
@@ -123,6 +203,7 @@ impl ConnectionDialog {
                         ui.add(
                             TextEdit::singleline(&mut config.name)
                                 .hint_text("我的数据库")
+                                .char_limit(64)
                                 .desired_width(280.0)
                         );
                         ui.end_row();
@@ -133,6 +214,7 @@ impl ConnectionDialog {
                             ui.add(
                                 TextEdit::singleline(&mut config.host)
                                     .hint_text("localhost")
+                                    .char_limit(255)
                                     .desired_width(280.0)
                             );
                             ui.end_row();
@@ -155,6 +237,7 @@ impl ConnectionDialog {
                             ui.add(
                                 TextEdit::singleline(&mut config.username)
                                     .hint_text("root")
+                                    .char_limit(128)
                                     .desired_width(280.0)
                             );
                             ui.end_row();
@@ -164,6 +247,7 @@ impl ConnectionDialog {
                             ui.add(
                                 TextEdit::singleline(&mut config.password)
                                     .password(true)
+                                    .char_limit(256)
                                     .desired_width(280.0)
                             );
                             ui.end_row();
@@ -240,6 +324,9 @@ impl ConnectionDialog {
         on_save: &mut bool,
         should_close: &mut bool,
     ) {
+        // 执行验证
+        let validation = validate_config(config);
+
         ui.horizontal(|ui| {
             // 取消按钮
             if ui.add(
@@ -250,29 +337,26 @@ impl ConnectionDialog {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // SQLite 需要文件路径，MySQL/PostgreSQL 只需要主机地址
-                let can_save = !config.name.is_empty()
-                    && match config.db_type {
-                        DatabaseType::SQLite => !config.database.is_empty(),
-                        _ => !config.host.is_empty(),
-                    };
-
                 // 保存按钮
                 let save_btn = egui::Button::new(
                     RichText::new("✓ 保存并连接 [Enter]")
-                        .color(if can_save { Color32::WHITE } else { GRAY })
+                        .color(if validation.is_valid { Color32::WHITE } else { GRAY })
                 )
-                .fill(if can_save { SUCCESS } else { Color32::from_rgb(80, 80, 90) })
+                .fill(if validation.is_valid { SUCCESS } else { Color32::from_rgb(80, 80, 90) })
                 .rounding(Rounding::same(6.0));
 
-                if ui.add_enabled(can_save, save_btn).clicked() {
+                if ui.add_enabled(validation.is_valid, save_btn).clicked() {
                     *on_save = true;
                     *should_close = true;
                 }
 
-                if !can_save {
+                // 显示验证错误
+                if !validation.is_valid {
                     ui.add_space(SPACING_MD);
-                    ui.label(RichText::new("请填写必填项").small().color(DANGER));
+                    // 只显示第一个错误
+                    if let Some(error) = validation.errors.first() {
+                        ui.label(RichText::new(error).small().color(DANGER));
+                    }
                 }
             });
         });

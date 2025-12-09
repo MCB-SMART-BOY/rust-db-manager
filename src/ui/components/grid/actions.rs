@@ -12,29 +12,47 @@ pub struct DataGridActions {
     pub message: Option<String>,
 }
 
-/// 验证并转义 SQL 标识符（表名、列名）
+/// 验证 SQL 标识符（表名、列名）
 ///
-/// 防止 SQL 注入攻击，只允许合法的标识符字符
-fn escape_identifier(name: &str) -> Result<String, String> {
-    // 验证标识符：只允许字母、数字、下划线，且不能以数字开头
+/// 防止 SQL 注入攻击，禁止危险字符
+/// 返回经过验证的原始标识符（不加引号）
+pub fn escape_identifier(name: &str) -> Result<String, String> {
     if name.is_empty() {
         return Err("标识符不能为空".to_string());
     }
 
-    let first_char = name.chars().next().unwrap();
-    if !first_char.is_alphabetic() && first_char != '_' {
-        return Err(format!("标识符 '{}' 不能以数字或特殊字符开头", name));
+    // 限制长度（PostgreSQL 63 字符，MySQL 64 字符，取最小值）
+    if name.len() > 63 {
+        return Err(format!("标识符过长 (最大63字符): {}", name));
     }
 
+    // 禁止包含危险字符：引号、分号、注释符等
+    let dangerous_chars = ['"', '\'', ';', '/', '*', '\\', '\n', '\r', '\0', '`'];
     for c in name.chars() {
-        if !c.is_alphanumeric() && c != '_' {
+        if dangerous_chars.contains(&c) {
             return Err(format!("标识符 '{}' 包含非法字符 '{}'", name, c));
         }
     }
 
-    // 使用双引号包裹（ANSI SQL 标准），适用于 PostgreSQL 和 SQLite
-    // MySQL 使用反引号，但双引号在 ANSI_QUOTES 模式下也可用
-    Ok(format!("\"{}\"", name))
+    // 返回经过验证的原始标识符
+    Ok(name.to_string())
+}
+
+/// 为 SQL 查询引用标识符（根据数据库类型使用不同的引号）
+/// 
+/// - MySQL: 使用反引号 `table`
+/// - PostgreSQL/SQLite: 使用双引号 "table"
+pub fn quote_identifier(name: &str, use_backticks: bool) -> Result<String, String> {
+    // 先验证标识符
+    let validated = escape_identifier(name)?;
+    
+    if use_backticks {
+        // MySQL 使用反引号
+        Ok(format!("`{}`", validated.replace('`', "``")))
+    } else {
+        // PostgreSQL/SQLite 使用双引号
+        Ok(format!("\"{}\"", validated.replace('"', "\"\"")))
+    }
 }
 
 /// 转义 SQL 字符串值
@@ -79,13 +97,21 @@ pub fn generate_save_sql(
     let mut sql_statements = Vec::new();
     let has_deletes = !state.rows_to_delete.is_empty();
 
-    // 获取主键列（第一列）
-    let pk_col = safe_columns.first().cloned().unwrap_or_else(|| "\"id\"".to_string());
+    // 获取主键列索引（如果未设置，尝试查找 id 列，否则使用第一列）
+    let pk_idx = state.primary_key_column.unwrap_or_else(|| {
+        // 尝试查找名为 "id" 的列
+        result.columns.iter()
+            .position(|c| c.eq_ignore_ascii_case("id"))
+            .unwrap_or(0)  // 默认使用第一列
+    });
+    
+    let pk_col = safe_columns.get(pk_idx).cloned()
+        .unwrap_or_else(|| safe_columns.first().cloned().unwrap_or_else(|| "id".to_string()));
 
     // 生成 UPDATE 语句
     for ((row_idx, col_idx), new_value) in &state.modified_cells {
         if let Some(row) = result.rows.get(*row_idx) {
-            if let Some(pk_value) = row.first() {
+            if let Some(pk_value) = row.get(pk_idx) {
                 if let Some(col_name) = safe_columns.get(*col_idx) {
                     let safe_value = if new_value.is_empty() || new_value.eq_ignore_ascii_case("null") {
                         "NULL".to_string()
@@ -107,7 +133,7 @@ pub fn generate_save_sql(
     // 生成 DELETE 语句
     for row_idx in &state.rows_to_delete {
         if let Some(row) = result.rows.get(*row_idx) {
-            if let Some(pk_value) = row.first() {
+            if let Some(pk_value) = row.get(pk_idx) {
                 let safe_pk_value = escape_value(pk_value);
                 let sql = format!(
                     "DELETE FROM {} WHERE {} = {};",
@@ -188,19 +214,37 @@ mod tests {
 
     #[test]
     fn test_escape_identifier_valid() {
-        assert_eq!(escape_identifier("users").unwrap(), "\"users\"");
-        assert_eq!(escape_identifier("user_name").unwrap(), "\"user_name\"");
-        assert_eq!(escape_identifier("_private").unwrap(), "\"_private\"");
-        assert_eq!(escape_identifier("Table123").unwrap(), "\"Table123\"");
+        // escape_identifier 只验证并返回原始标识符
+        assert_eq!(escape_identifier("users").unwrap(), "users");
+        assert_eq!(escape_identifier("user_name").unwrap(), "user_name");
+        assert_eq!(escape_identifier("_private").unwrap(), "_private");
+        assert_eq!(escape_identifier("Table123").unwrap(), "Table123");
+        // 支持中文表名
+        assert_eq!(escape_identifier("用户表").unwrap(), "用户表");
     }
 
     #[test]
     fn test_escape_identifier_invalid() {
         assert!(escape_identifier("").is_err());
-        assert!(escape_identifier("123table").is_err());
-        assert!(escape_identifier("user-name").is_err());
+        // 危险字符被禁止
         assert!(escape_identifier("user;drop").is_err());
-        assert!(escape_identifier("table name").is_err());
+        assert!(escape_identifier("table'name").is_err());
+        assert!(escape_identifier("table\"name").is_err());
+        assert!(escape_identifier("table`name").is_err());
+        // 超长标识符
+        let long_name = "a".repeat(64);
+        assert!(escape_identifier(&long_name).is_err());
+    }
+
+    #[test]
+    fn test_quote_identifier() {
+        // MySQL 使用反引号
+        assert_eq!(quote_identifier("users", true).unwrap(), "`users`");
+        assert_eq!(quote_identifier("user_name", true).unwrap(), "`user_name`");
+        
+        // PostgreSQL/SQLite 使用双引号
+        assert_eq!(quote_identifier("users", false).unwrap(), "\"users\"");
+        assert_eq!(quote_identifier("user_name", false).unwrap(), "\"user_name\"");
     }
 
     #[test]

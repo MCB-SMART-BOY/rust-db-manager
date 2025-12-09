@@ -55,11 +55,11 @@ impl HistoryPanel {
 
                         frame.show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                // 状态图标
+                                // 状态图标 - 使用图标+文字双重指示，对色盲友好
                                 if item.success {
-                                    ui.colored_label(SUCCESS, "成功");
+                                    ui.colored_label(SUCCESS, "✓ 成功");
                                 } else {
-                                    ui.colored_label(DANGER, "失败");
+                                    ui.colored_label(DANGER, "✗ 失败");
                                 }
 
                                 ui.separator();

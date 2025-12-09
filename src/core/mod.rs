@@ -2,6 +2,7 @@
 
 mod autocomplete;
 mod config;
+pub mod constants;
 mod export;
 mod formatter;
 mod history;

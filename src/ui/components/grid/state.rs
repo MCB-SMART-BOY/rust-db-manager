@@ -83,6 +83,11 @@ pub struct DataGridState {
     pub quick_filter_input: String,
     /// 筛选结果缓存
     pub filter_cache: FilterCache,
+    /// 主键列索引（None 表示未知，编辑功能将被禁用）
+    pub primary_key_column: Option<usize>,
+    /// 正则表达式错误信息（用于显示给用户）
+    #[allow(dead_code)] // 预留字段供将来使用
+    pub regex_error: Option<String>,
 }
 
 impl DataGridState {
