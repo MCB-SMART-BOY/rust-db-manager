@@ -2,6 +2,7 @@
 
 简洁、快速、安全的跨平台数据库管理工具，专为键盘党打造。
 
+![Version](https://img.shields.io/badge/version-0.2.0-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
