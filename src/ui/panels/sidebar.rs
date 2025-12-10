@@ -265,11 +265,9 @@ impl Sidebar {
                             actions.disconnect = Some(name.to_string());
                             ui.close_menu();
                         }
-                    } else {
-                        if ui.button("🔗 连接").clicked() {
-                            actions.connect = Some(name.to_string());
-                            ui.close_menu();
-                        }
+                    } else if ui.button("🔗 连接").clicked() {
+                        actions.connect = Some(name.to_string());
+                        ui.close_menu();
                     }
                     ui.separator();
                     if ui
@@ -343,16 +341,14 @@ impl Sidebar {
                     actions.disconnect = Some(name.to_string());
                     *selected_table = None;
                 }
-            } else {
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("连接").small())
-                            .rounding(Rounding::same(4.0)),
-                    )
-                    .clicked()
-                {
-                    actions.connect = Some(name.to_string());
-                }
+            } else if ui
+                .add(
+                    egui::Button::new(RichText::new("连接").small())
+                        .rounding(Rounding::same(4.0)),
+                )
+                .clicked()
+            {
+                actions.connect = Some(name.to_string());
             }
 
             if ui

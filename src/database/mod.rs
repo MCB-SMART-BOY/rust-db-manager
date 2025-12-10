@@ -62,6 +62,32 @@ impl DbError {
 }
 
 // ============================================================================
+// URL 编码辅助函数
+// ============================================================================
+
+/// 对字符串进行 URL 编码，用于 MySQL 连接字符串
+/// 
+/// 处理特殊字符如 #、@、:、/ 等，确保连接字符串正确解析
+fn url_encode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() * 3);
+    for c in s.chars() {
+        match c {
+            // 安全字符，不需要编码
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => {
+                result.push(c);
+            }
+            // 特殊字符需要编码
+            _ => {
+                for byte in c.to_string().as_bytes() {
+                    result.push_str(&format!("%{:02X}", byte));
+                }
+            }
+        }
+    }
+    result
+}
+
+// ============================================================================
 // 数据库类型
 // ============================================================================
 
@@ -109,6 +135,57 @@ impl DatabaseType {
 // 连接配置
 // ============================================================================
 
+/// MySQL SSL 模式
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
+pub enum MySqlSslMode {
+    /// 禁用 SSL（默认）
+    #[default]
+    Disabled,
+    /// 优先使用 SSL，但允许不安全连接
+    Preferred,
+    /// 必须使用 SSL
+    Required,
+    /// 验证 CA 证书
+    VerifyCa,
+    /// 验证 CA 证书和主机名
+    VerifyIdentity,
+}
+
+impl MySqlSslMode {
+    /// 获取显示名称
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            Self::Disabled => "禁用",
+            Self::Preferred => "优先",
+            Self::Required => "必需",
+            Self::VerifyCa => "验证 CA",
+            Self::VerifyIdentity => "完全验证",
+        }
+    }
+
+    /// 获取描述
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Disabled => "不使用 SSL 加密",
+            Self::Preferred => "优先 SSL，允许不安全连接",
+            Self::Required => "必须使用 SSL 加密",
+            Self::VerifyCa => "验证服务器 CA 证书",
+            Self::VerifyIdentity => "验证证书和主机名",
+        }
+    }
+
+    /// 获取所有选项
+    pub const fn all() -> &'static [MySqlSslMode] {
+        &[
+            Self::Disabled,
+            Self::Preferred,
+            Self::Required,
+            Self::VerifyCa,
+            Self::VerifyIdentity,
+        ]
+    }
+}
+
 /// 数据库连接配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct ConnectionConfig {
@@ -128,6 +205,15 @@ pub struct ConnectionConfig {
     /// 数据库名（SQLite 为文件路径，MySQL/PostgreSQL 为可选的默认数据库）
     #[serde(default)]
     pub database: String,
+    /// SSH 隧道配置
+    #[serde(default)]
+    pub ssh_config: ssh_tunnel::SshTunnelConfig,
+    /// MySQL SSL 模式
+    #[serde(default)]
+    pub mysql_ssl_mode: MySqlSslMode,
+    /// CA 证书路径（可选，用于 VerifyCa/VerifyIdentity 模式）
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ssl_ca_cert: String,
 }
 
 /// 获取机器特定的加密密钥
@@ -287,7 +373,7 @@ fn decrypt_password(encrypted: &str) -> Result<String, String> {
 }
 
 /// 将密码加密后存储
-fn encode_password<S>(password: &String, serializer: S) -> Result<S::Ok, S::Error>
+fn encode_password<S>(password: &str, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
@@ -297,7 +383,7 @@ where
         serializer.serialize_str("")
     } else {
         let encrypted = encrypt_password(password)
-            .map_err(|e| S::Error::custom(e))?;
+            .map_err(S::Error::custom)?;
         serializer.serialize_str(&encrypted)
     }
 }
@@ -315,7 +401,7 @@ where
     }
 
     decrypt_password(&s)
-        .map_err(|e| D::Error::custom(e))
+        .map_err(D::Error::custom)
 }
 
 impl ConnectionConfig {
@@ -353,15 +439,18 @@ impl ConnectionConfig {
                 )
             }
             DatabaseType::MySQL => {
+                // URL 编码用户名和密码，处理特殊字符（如 #、@、: 等）
+                let encoded_user = url_encode(&self.username);
+                let encoded_pass = url_encode(&self.password);
                 if let Some(db) = database.filter(|s| !s.is_empty()) {
                     format!(
                         "mysql://{}:{}@{}:{}/{}",
-                        self.username, self.password, self.host, self.port, db
+                        encoded_user, encoded_pass, self.host, self.port, db
                     )
                 } else {
                     format!(
                         "mysql://{}:{}@{}:{}",
-                        self.username, self.password, self.host, self.port
+                        encoded_user, encoded_pass, self.host, self.port
                     )
                 }
             }
@@ -607,10 +696,13 @@ impl PoolManager {
                     .expect("连接池约束无效")
             );
         
-        let opts = mysql_async::OptsBuilder::from_opts(
+        let mut opts = mysql_async::OptsBuilder::from_opts(
             mysql_async::Opts::from_url(config.connection_string().as_str())
                 .map_err(|e| DbError::Connection(format!("MySQL URL 解析失败: {}", e)))?
         ).pool_opts(pool_opts);
+        
+        // 配置 SSL 选项
+        opts = Self::configure_mysql_ssl(opts, config)?;
         
         let pool = mysql_async::Pool::new(opts);
 
@@ -626,6 +718,73 @@ impl PoolManager {
         }
 
         Ok(pool)
+    }
+    
+    /// 配置 MySQL SSL 选项
+    fn configure_mysql_ssl(
+        opts: mysql_async::OptsBuilder,
+        config: &ConnectionConfig,
+    ) -> Result<mysql_async::OptsBuilder, DbError> {
+        use mysql_async::SslOpts;
+        use std::path::Path;
+        
+        match config.mysql_ssl_mode {
+            MySqlSslMode::Disabled => {
+                // 不使用 SSL
+                Ok(opts.ssl_opts(None::<SslOpts>))
+            }
+            MySqlSslMode::Preferred => {
+                // 优先 SSL，但接受无效证书（允许回退到不安全连接）
+                let ssl_opts = SslOpts::default()
+                    .with_danger_accept_invalid_certs(true)
+                    .with_danger_skip_domain_validation(true);
+                Ok(opts.ssl_opts(Some(ssl_opts)))
+            }
+            MySqlSslMode::Required => {
+                // 必须使用 SSL，但不验证证书
+                let ssl_opts = SslOpts::default()
+                    .with_danger_accept_invalid_certs(true)
+                    .with_danger_skip_domain_validation(true);
+                Ok(opts.ssl_opts(Some(ssl_opts)))
+            }
+            MySqlSslMode::VerifyCa => {
+                // 验证 CA 证书，但不验证主机名
+                let mut ssl_opts = SslOpts::default()
+                    .with_danger_skip_domain_validation(true);
+                
+                // 如果指定了 CA 证书路径
+                if !config.ssl_ca_cert.is_empty() {
+                    let ca_path = Path::new(&config.ssl_ca_cert);
+                    if !ca_path.exists() {
+                        return Err(DbError::Connection(format!(
+                            "CA 证书文件不存在: {}", config.ssl_ca_cert
+                        )));
+                    }
+                    // 使用 PathBuf 拥有路径所有权
+                    ssl_opts = ssl_opts.with_root_certs(vec![ca_path.to_path_buf().into()]);
+                }
+                
+                Ok(opts.ssl_opts(Some(ssl_opts)))
+            }
+            MySqlSslMode::VerifyIdentity => {
+                // 完全验证：验证 CA 证书和主机名
+                let mut ssl_opts = SslOpts::default();
+                
+                // 如果指定了 CA 证书路径
+                if !config.ssl_ca_cert.is_empty() {
+                    let ca_path = Path::new(&config.ssl_ca_cert);
+                    if !ca_path.exists() {
+                        return Err(DbError::Connection(format!(
+                            "CA 证书文件不存在: {}", config.ssl_ca_cert
+                        )));
+                    }
+                    // 使用 PathBuf 拥有路径所有权
+                    ssl_opts = ssl_opts.with_root_certs(vec![ca_path.to_path_buf().into()]);
+                }
+                
+                Ok(opts.ssl_opts(Some(ssl_opts)))
+            }
+        }
     }
 
     /// 获取或创建 PostgreSQL 客户端
@@ -727,6 +886,8 @@ lazy_static::lazy_static! {
 // ============================================================================
 
 mod query;
+pub mod ssh_tunnel;
 
 #[allow(unused_imports)] // get_primary_key_column 预留供将来使用
 pub use query::{connect_database, execute_query, get_tables_for_database, get_primary_key_column, ConnectResult};
+pub use ssh_tunnel::SshAuthMethod;

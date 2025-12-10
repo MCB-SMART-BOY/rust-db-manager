@@ -132,7 +132,7 @@ pub fn format_sql(sql: &str) -> String {
                         None
                     };
 
-                    if next_char.is_none() || !next_char.unwrap().is_alphanumeric() {
+                    if !next_char.is_some_and(|c| c.is_alphanumeric()) {
                         // 添加换行和缩进
                         if !result.is_empty() && !result.ends_with('\n') {
                             result.push('\n');

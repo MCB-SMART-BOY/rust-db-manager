@@ -8,7 +8,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
 use crate::core::{
-    constants, export_to_csv, export_to_json, export_to_sql, format_sql, import_sql_file,
+    constants, format_sql, import_sql_file,
     AppConfig, AutoComplete, ExportFormat, HighlightColors, QueryHistory, ThemeManager,
     ThemePreset,
 };
@@ -16,7 +16,7 @@ use crate::database::{
     connect_database, execute_query, get_tables_for_database, ConnectResult,
     ConnectionConfig, ConnectionManager, QueryResult,
 };
-use crate::ui::{self, SqlEditorActions, ToolbarActions};
+use crate::ui::{self, DdlDialogState, ExportConfig, QueryTabBar, QueryTabManager, SqlEditorActions, ToolbarActions};
 
 /// 异步任务完成后发送的消息
 enum Message {
@@ -43,6 +43,8 @@ pub struct DbManagerApp {
     selected_table: Option<String>,
     sql: String,
     result: Option<QueryResult>,
+    // 多 Tab 查询管理器
+    tab_manager: QueryTabManager,
 
     // 异步通信
     tx: Sender<Message>,
@@ -75,7 +77,7 @@ pub struct DbManagerApp {
 
     // UI 状态
     show_export_dialog: bool,
-    export_format: ExportFormat,
+    export_config: ExportConfig,
     export_status: Option<Result<String, String>>,
     show_history_panel: bool,
 
@@ -111,6 +113,8 @@ pub struct DbManagerApp {
     ui_scale: f32,
     // 基础 DPI 缩放（系统设置）
     base_pixels_per_point: f32,
+    // DDL 对话框状态
+    ddl_dialog_state: DdlDialogState,
 }
 
 impl DbManagerApp {
@@ -156,6 +160,7 @@ impl DbManagerApp {
             selected_table: None,
             sql: String::new(),
             result: None,
+            tab_manager: QueryTabManager::new(),
             tx,
             rx,
             runtime,
@@ -173,7 +178,7 @@ impl DbManagerApp {
             selected_cell: None,
             grid_state: ui::DataGridState::new(),
             show_export_dialog: false,
-            export_format: ExportFormat::Csv,
+            export_config: ExportConfig::default(),
             export_status: None,
             show_history_panel: false,
             show_delete_confirm: false,
@@ -191,6 +196,7 @@ impl DbManagerApp {
             help_scroll_offset: 0.0,
             ui_scale,
             base_pixels_per_point,
+            ddl_dialog_state: DdlDialogState::default(),
         }
     }
 
@@ -369,6 +375,13 @@ impl DbManagerApp {
                 self.result = None;
                 self.last_query_time_ms = None;
 
+                // 同步 SQL 到当前 Tab 并设置执行状态
+                if let Some(tab) = self.tab_manager.get_active_mut() {
+                    tab.sql = sql.clone();
+                    tab.executing = true;
+                    tab.update_title();
+                }
+
                 self.runtime.spawn(async move {
                     use tokio::time::{timeout, Duration};
                     let start = Instant::now();
@@ -514,15 +527,29 @@ impl DbManagerApp {
                                 ));
                             }
 
-                            self.result = Some(res);
+                            self.result = Some(res.clone());
                             self.selected_row = None;
                             self.selected_cell = None;
                             self.search_text.clear();
+
+                            // 同步结果到当前 Tab
+                            if let Some(tab) = self.tab_manager.get_active_mut() {
+                                tab.result = Some(res);
+                                tab.executing = false;
+                                tab.query_time_ms = Some(elapsed_ms);
+                                tab.last_message = self.last_message.clone();
+                            }
                         }
                         Err(e) => {
                             self.query_history.add(sql, db_type, false, None);
                             self.last_message = Some(format!("错误: {}", e));
                             self.result = Some(QueryResult::default());
+
+                            // 同步错误到当前 Tab
+                            if let Some(tab) = self.tab_manager.get_active_mut() {
+                                tab.executing = false;
+                                tab.last_message = self.last_message.clone();
+                            }
                         }
                     }
                     ctx.request_repaint();
@@ -531,48 +558,345 @@ impl DbManagerApp {
         }
     }
 
-    fn handle_export(&mut self, format: ExportFormat) {
+    fn handle_export_with_config(&mut self, config: ExportConfig) {
         let table_name = self
             .selected_table
             .clone()
             .unwrap_or_else(|| "query_result".to_string());
 
         if let Some(result) = &self.result {
-            let filter_name = format!("{} 文件", format.display_name());
-            let filter_ext = format.extension();
+            let filter_name = format!("{} 文件", config.format.display_name());
+            let filter_ext = config.format.extension();
 
             let file_dialog = rfd::FileDialog::new()
                 .set_file_name(format!("{}.{}", table_name, filter_ext))
                 .add_filter(&filter_name, &[filter_ext]);
 
             if let Some(path) = file_dialog.save_file() {
-                let export_result = match format {
-                    ExportFormat::Csv => export_to_csv(result, &path),
-                    ExportFormat::Sql => export_to_sql(result, &table_name, &path),
-                    ExportFormat::Json => export_to_json(result, &path),
+                // 根据配置过滤数据
+                let filtered_result = self.filter_result_for_export(result, &config);
+                
+                let export_result = match config.format {
+                    ExportFormat::Csv => self.export_csv_with_config(&filtered_result, &path, &config),
+                    ExportFormat::Sql => self.export_sql_with_config(&filtered_result, &table_name, &path, &config),
+                    ExportFormat::Json => self.export_json_with_config(&filtered_result, &path, &config),
                 };
 
                 self.export_status = Some(match export_result {
-                    Ok(()) => Ok(format!("已导出到 {}", path.display())),
+                    Ok(()) => Ok(format!("已导出 {} 行到 {}", filtered_result.rows.len(), path.display())),
                     Err(e) => Err(e),
                 });
             }
         }
     }
+    
+    /// 根据导出配置过滤查询结果
+    fn filter_result_for_export(&self, result: &QueryResult, config: &ExportConfig) -> QueryResult {
+        let selected_indices = config.get_selected_column_indices();
+        
+        // 过滤列
+        let columns: Vec<String> = selected_indices
+            .iter()
+            .filter_map(|&i| result.columns.get(i).cloned())
+            .collect();
+        
+        // 过滤行（根据起始行和限制）
+        let rows: Vec<Vec<String>> = result.rows
+            .iter()
+            .skip(config.start_row)
+            .take(if config.row_limit > 0 { config.row_limit } else { usize::MAX })
+            .map(|row| {
+                selected_indices
+                    .iter()
+                    .filter_map(|&i| row.get(i).cloned())
+                    .collect()
+            })
+            .collect();
+        
+        QueryResult {
+            columns,
+            rows,
+            affected_rows: result.affected_rows,
+        }
+    }
+    
+    /// 使用配置导出 CSV
+    fn export_csv_with_config(
+        &self,
+        result: &QueryResult,
+        path: &std::path::Path,
+        config: &ExportConfig,
+    ) -> Result<(), String> {
+        use std::fs::File;
+        use std::io::Write;
+        
+        let mut file = File::create(path).map_err(|e| e.to_string())?;
+        let delimiter = config.csv_delimiter.to_string();
+        let quote = config.csv_quote_char;
+        
+        // 转义 CSV 字段
+        let escape_field = |field: &str| -> String {
+            if field.contains(config.csv_delimiter) || field.contains(quote) || field.contains('\n') {
+                format!("{}{}{}", quote, field.replace(quote, &format!("{}{}", quote, quote)), quote)
+            } else {
+                field.to_string()
+            }
+        };
+        
+        // 写入表头
+        if config.csv_include_header {
+            let header = result.columns
+                .iter()
+                .map(|c| escape_field(c))
+                .collect::<Vec<_>>()
+                .join(&delimiter);
+            writeln!(file, "{}", header).map_err(|e| e.to_string())?;
+        }
+        
+        // 写入数据行
+        for row in &result.rows {
+            let line = row
+                .iter()
+                .map(|cell| escape_field(cell))
+                .collect::<Vec<_>>()
+                .join(&delimiter);
+            writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+        }
+        
+        Ok(())
+    }
+    
+    /// 使用配置导出 SQL
+    fn export_sql_with_config(
+        &self,
+        result: &QueryResult,
+        table_name: &str,
+        path: &std::path::Path,
+        config: &ExportConfig,
+    ) -> Result<(), String> {
+        use std::fs::File;
+        use std::io::Write;
+        
+        let mut file = File::create(path).map_err(|e| e.to_string())?;
+        
+        writeln!(file, "-- Exported from Rust DB Manager").map_err(|e| e.to_string())?;
+        writeln!(file, "-- Table: {}", table_name).map_err(|e| e.to_string())?;
+        writeln!(file, "-- Rows: {}\n", result.rows.len()).map_err(|e| e.to_string())?;
+        
+        if result.columns.is_empty() || result.rows.is_empty() {
+            writeln!(file, "-- No data to export").map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        
+        // 开始事务
+        if config.sql_use_transaction {
+            writeln!(file, "BEGIN;").map_err(|e| e.to_string())?;
+            writeln!(file).map_err(|e| e.to_string())?;
+        }
+        
+        let escaped_table = table_name.replace('`', "``");
+        let columns_str = result.columns
+            .iter()
+            .map(|c| format!("`{}`", c.replace('`', "``")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        
+        if config.sql_batch_size > 0 {
+            // 批量插入
+            for chunk in result.rows.chunks(config.sql_batch_size) {
+                let values_list: Vec<String> = chunk
+                    .iter()
+                    .map(|row| {
+                        let values = row
+                            .iter()
+                            .map(|cell| {
+                                if cell == "NULL" {
+                                    "NULL".to_string()
+                                } else {
+                                    format!("'{}'", cell.replace('\'', "''"))
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("({})", values)
+                    })
+                    .collect();
+                
+                writeln!(
+                    file,
+                    "INSERT INTO `{}` ({}) VALUES\n  {};",
+                    escaped_table,
+                    columns_str,
+                    values_list.join(",\n  ")
+                ).map_err(|e| e.to_string())?;
+                writeln!(file).map_err(|e| e.to_string())?;
+            }
+        } else {
+            // 单行插入
+            for row in &result.rows {
+                let values = row
+                    .iter()
+                    .map(|cell| {
+                        if cell == "NULL" {
+                            "NULL".to_string()
+                        } else {
+                            format!("'{}'", cell.replace('\'', "''"))
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                
+                writeln!(
+                    file,
+                    "INSERT INTO `{}` ({}) VALUES ({});",
+                    escaped_table, columns_str, values
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+        
+        // 提交事务
+        if config.sql_use_transaction {
+            writeln!(file).map_err(|e| e.to_string())?;
+            writeln!(file, "COMMIT;").map_err(|e| e.to_string())?;
+        }
+        
+        Ok(())
+    }
+    
+    /// 使用配置导出 JSON
+    fn export_json_with_config(
+        &self,
+        result: &QueryResult,
+        path: &std::path::Path,
+        config: &ExportConfig,
+    ) -> Result<(), String> {
+        use std::fs::File;
+        use std::io::Write;
+        
+        let mut file = File::create(path).map_err(|e| e.to_string())?;
+        
+        let json_rows: Vec<serde_json::Map<String, serde_json::Value>> = result.rows
+            .iter()
+            .map(|row| {
+                result.columns
+                    .iter()
+                    .zip(row.iter())
+                    .map(|(col, cell)| {
+                        let value = if cell == "NULL" {
+                            serde_json::Value::Null
+                        } else if let Ok(num) = cell.parse::<i64>() {
+                            serde_json::Value::Number(num.into())
+                        } else if let Ok(num) = cell.parse::<f64>() {
+                            serde_json::json!(num)
+                        } else {
+                            serde_json::Value::String(cell.clone())
+                        };
+                        (col.clone(), value)
+                    })
+                    .collect()
+            })
+            .collect();
+        
+        let json = if config.json_pretty {
+            serde_json::to_string_pretty(&json_rows)
+        } else {
+            serde_json::to_string(&json_rows)
+        }.map_err(|e| e.to_string())?;
+        
+        write!(file, "{}", json).map_err(|e| e.to_string())?;
+        
+        Ok(())
+    }
 
     fn handle_import(&mut self) {
+        use crate::core::{preview_csv, preview_json, import_csv_to_sql, import_json_to_sql, CsvImportConfig, JsonImportConfig};
+
         let file_dialog = rfd::FileDialog::new()
             .add_filter("SQL 文件", &["sql"])
+            .add_filter("CSV 文件", &["csv", "tsv"])
+            .add_filter("JSON 文件", &["json"])
             .add_filter("所有文件", &["*"]);
 
+        let use_mysql = self.is_mysql();
+
         if let Some(path) = file_dialog.pick_file() {
-            match import_sql_file(&path) {
-                Ok(content) => {
-                    self.sql = content;
-                    self.last_message = Some(format!("已导入: {}", path.display()));
+            let extension = path.extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
+
+            match extension.as_str() {
+                "csv" | "tsv" => {
+                    // 导入 CSV 文件
+                    let config = CsvImportConfig {
+                        delimiter: if extension == "tsv" { '\t' } else { ',' },
+                        ..Default::default()
+                    };
+
+                    match preview_csv(&path, &config) {
+                        Ok(preview) => {
+                            match import_csv_to_sql(&path, &config, use_mysql) {
+                                Ok(result) => {
+                                    self.sql = result.sql_statements.join("\n\n");
+                                    self.show_sql_editor = true;
+                                    self.focus_sql_editor = true;
+                                    self.last_message = Some(format!(
+                                        "已导入 CSV: {} ({} 行, {} 列)",
+                                        path.display(),
+                                        preview.total_rows,
+                                        preview.columns.len()
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.last_message = Some(format!("CSV 导入错误: {}", e));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.last_message = Some(format!("CSV 预览错误: {}", e));
+                        }
+                    }
                 }
-                Err(e) => {
-                    self.last_message = Some(format!("导入错误: {}", e));
+                "json" => {
+                    // 导入 JSON 文件
+                    let config = JsonImportConfig::default();
+
+                    match preview_json(&path, &config) {
+                        Ok(preview) => {
+                            match import_json_to_sql(&path, &config, use_mysql) {
+                                Ok(result) => {
+                                    self.sql = result.sql_statements.join("\n\n");
+                                    self.show_sql_editor = true;
+                                    self.focus_sql_editor = true;
+                                    self.last_message = Some(format!(
+                                        "已导入 JSON: {} ({} 行, {} 列)",
+                                        path.display(),
+                                        preview.total_rows,
+                                        preview.columns.len()
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.last_message = Some(format!("JSON 导入错误: {}", e));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.last_message = Some(format!("JSON 预览错误: {}", e));
+                        }
+                    }
+                }
+                _ => {
+                    // SQL 文件或其他
+                    match import_sql_file(&path) {
+                        Ok(content) => {
+                            self.sql = content;
+                            self.show_sql_editor = true;
+                            self.last_message = Some(format!("已导入: {}", path.display()));
+                        }
+                        Err(e) => {
+                            self.last_message = Some(format!("导入错误: {}", e));
+                        }
+                    }
                 }
             }
         }
@@ -787,7 +1111,7 @@ impl eframe::App for DbManagerApp {
         }
 
         // 导出对话框
-        let mut export_action: Option<ExportFormat> = None;
+        let mut export_action: Option<ExportConfig> = None;
         let table_name = self
             .selected_table
             .clone()
@@ -795,14 +1119,27 @@ impl eframe::App for DbManagerApp {
         ui::ExportDialog::show(
             ctx,
             &mut self.show_export_dialog,
-            &mut self.export_format,
+            &mut self.export_config,
             &table_name,
+            self.result.as_ref(),
             &mut export_action,
             &self.export_status,
         );
 
-        if let Some(format) = export_action {
-            self.handle_export(format);
+        if let Some(config) = export_action {
+            self.handle_export_with_config(config);
+        }
+
+        // DDL 对话框（创建表）
+        let ddl_result = ui::DdlDialog::show_create_table(
+            ctx,
+            &mut self.ddl_dialog_state,
+        );
+        if let Some(create_sql) = ddl_result {
+            // 将生成的 SQL 放入编辑器
+            self.sql = create_sql;
+            self.show_sql_editor = true;
+            self.focus_sql_editor = true;
         }
 
         // 历史记录面板
@@ -907,6 +1244,43 @@ impl eframe::App for DbManagerApp {
                 selected_table,
                 self.ui_scale,
             );
+
+            ui.separator();
+
+            // Tab 栏（多查询窗口）
+            let tab_actions = QueryTabBar::show(
+                ui,
+                &self.tab_manager.tabs,
+                self.tab_manager.active_index,
+                &self.highlight_colors,
+            );
+
+            // 处理 Tab 栏操作
+            if tab_actions.new_tab {
+                self.tab_manager.new_tab();
+            }
+            if let Some(idx) = tab_actions.switch_to {
+                self.tab_manager.set_active(idx);
+                // 同步当前 Tab 的 SQL 和结果到主状态
+                if let Some(tab) = self.tab_manager.get_active() {
+                    self.sql = tab.sql.clone();
+                    self.result = tab.result.clone();
+                }
+            }
+            if let Some(idx) = tab_actions.close_tab {
+                self.tab_manager.close_tab(idx);
+                // 同步当前 Tab 的状态
+                if let Some(tab) = self.tab_manager.get_active() {
+                    self.sql = tab.sql.clone();
+                    self.result = tab.result.clone();
+                }
+            }
+            if tab_actions.close_others {
+                self.tab_manager.close_other_tabs();
+            }
+            if tab_actions.close_right {
+                self.tab_manager.close_tabs_to_right();
+            }
 
             ui.separator();
 
@@ -1078,6 +1452,13 @@ impl eframe::App for DbManagerApp {
 
         if toolbar_actions.import {
             self.handle_import();
+        }
+
+        if toolbar_actions.create_table {
+            let db_type = self.manager.get_active()
+                .map(|c| c.config.db_type.clone())
+                .unwrap_or_default();
+            self.ddl_dialog_state.open_create_table(db_type);
         }
 
         if let Some(preset) = toolbar_actions.theme_changed {

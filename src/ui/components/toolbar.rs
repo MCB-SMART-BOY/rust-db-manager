@@ -44,6 +44,8 @@ pub struct ToolbarActions {
     pub zoom_in: bool,
     pub zoom_out: bool,
     pub zoom_reset: bool,
+    // DDL 操作
+    pub create_table: bool,
 }
 
 // 暗色主题列表
@@ -327,6 +329,11 @@ impl Toolbar {
         // 导入
         if ui.add(Self::styled_button("导入 [Ctrl+I]")).clicked() {
             actions.import = true;
+        }
+
+        // 创建表
+        if ui.add(Self::styled_button("新建表")).clicked() {
+            actions.create_table = true;
         }
 
         Self::separator(ui);

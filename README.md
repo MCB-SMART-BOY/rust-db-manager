@@ -9,11 +9,13 @@
 ## 特性亮点
 
 - **多数据库支持** - SQLite、PostgreSQL、MySQL/MariaDB
+- **SSH 隧道支持** - 通过 SSH 安全连接远程数据库
+- **MySQL SSL/TLS** - 5 种 SSL 模式（Disabled/Preferred/Required/VerifyCa/VerifyIdentity）
 - **Helix/Vim 风格键位** - 三种编辑模式（Normal/Select/Insert），hjkl 导航
 - **智能 SQL 编辑器** - 语法高亮、上下文感知自动补全、SQL 格式化
 - **高级筛选系统** - 16 种操作符、多条件组合（AND/OR）、正则支持
 - **19 种主题预设** - Tokyo Night、Catppuccin、One Dark、Gruvbox 等
-- **数据导出** - CSV、JSON、SQL INSERT 语句
+- **数据导出** - CSV、JSON、SQL INSERT（支持列选择、行范围、格式选项）
 - **安全存储** - AES-256-GCM 加密密码
 - **轻量高效** - 单二进制文件，GPU 加速渲染，内存占用低
 
@@ -153,11 +155,12 @@ src/
 
 | 组件 | 技术 |
 |------|------|
-| GUI 框架 | egui 0.27 / eframe |
+| GUI 框架 | egui 0.29 / eframe |
 | 异步运行时 | Tokio（多线程） |
 | SQLite | rusqlite 0.31 (bundled) |
 | PostgreSQL | tokio-postgres 0.7 |
-| MySQL | mysql_async 0.33 |
+| MySQL | mysql_async 0.34 |
+| SSH 隧道 | russh 0.45 |
 | 加密 | ring 0.17 (AES-256-GCM) |
 | 序列化 | serde + toml |
 

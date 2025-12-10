@@ -9,6 +9,8 @@ pub mod styles;
 pub use components::{
     quote_identifier, DataGrid, DataGridState, SearchBar, SqlEditor, SqlEditorActions, Toolbar,
     ToolbarActions, Welcome,
+    // 多 Tab 查询
+    QueryTabBar, QueryTabManager,
 };
-pub use dialogs::{ConfirmDialog, ConnectionDialog, ExportDialog, HelpDialog};
+pub use dialogs::{ConfirmDialog, ConnectionDialog, DdlDialog, DdlDialogState, ExportConfig, ExportDialog, HelpDialog};
 pub use panels::{HistoryPanel, Sidebar, SidebarActions};

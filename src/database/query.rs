@@ -3,9 +3,11 @@
 //! 提供对 SQLite、PostgreSQL、MySQL 的统一查询接口。
 //! PostgreSQL 和 MySQL 使用连接池优化性能。
 
+use super::ssh_tunnel::{SshTunnel, SSH_TUNNEL_MANAGER};
 use super::*;
 use mysql_async::prelude::*;
 use rusqlite::{types::ValueRef, Connection as SqliteConn};
+use std::sync::Arc;
 use tokio::task;
 
 // ============================================================================
@@ -24,22 +26,25 @@ pub enum ConnectResult {
 ///
 /// - SQLite: 返回表列表
 /// - MySQL/PostgreSQL: 返回数据库列表
+///
+/// 如果配置了 SSH 隧道，会自动建立隧道连接
 pub async fn connect_database(config: &ConnectionConfig) -> Result<ConnectResult, DbError> {
-    let config = config.clone();
+    // 如果启用了 SSH 隧道，先建立隧道并修改连接配置
+    let (effective_config, _tunnel) = setup_ssh_tunnel_if_enabled(config).await?;
 
-    match config.db_type {
+    match effective_config.db_type {
         DatabaseType::SQLite => {
-            let tables = task::spawn_blocking(move || connect_sqlite(&config))
+            let tables = task::spawn_blocking(move || connect_sqlite(&effective_config))
                 .await
                 .map_err(|e| DbError::Connection(format!("任务执行失败: {}", e)))??;
             Ok(ConnectResult::Tables(tables))
         }
         DatabaseType::PostgreSQL => {
-            let databases = get_postgres_databases(&config).await?;
+            let databases = get_postgres_databases(&effective_config).await?;
             Ok(ConnectResult::Databases(databases))
         }
         DatabaseType::MySQL => {
-            let databases = get_mysql_databases(&config).await?;
+            let databases = get_mysql_databases(&effective_config).await?;
             Ok(ConnectResult::Databases(databases))
         }
     }
@@ -50,15 +55,16 @@ pub async fn get_tables_for_database(
     config: &ConnectionConfig,
     database: &str,
 ) -> Result<Vec<String>, DbError> {
-    let config = config.clone();
+    // 如果启用了 SSH 隧道，先建立隧道并修改连接配置
+    let (effective_config, _tunnel) = setup_ssh_tunnel_if_enabled(config).await?;
     let database = database.to_string();
 
-    match config.db_type {
-        DatabaseType::SQLite => task::spawn_blocking(move || connect_sqlite(&config))
+    match effective_config.db_type {
+        DatabaseType::SQLite => task::spawn_blocking(move || connect_sqlite(&effective_config))
             .await
             .map_err(|e| DbError::Connection(format!("任务执行失败: {}", e)))?,
-        DatabaseType::PostgreSQL => get_postgres_tables(&config, &database).await,
-        DatabaseType::MySQL => get_mysql_tables(&config, &database).await,
+        DatabaseType::PostgreSQL => get_postgres_tables(&effective_config, &database).await,
+        DatabaseType::MySQL => get_mysql_tables(&effective_config, &database).await,
     }
 }
 
@@ -70,17 +76,18 @@ pub async fn get_primary_key_column(
     config: &ConnectionConfig,
     table: &str,
 ) -> Result<Option<String>, DbError> {
-    let config = config.clone();
+    // 如果启用了 SSH 隧道，先建立隧道并修改连接配置
+    let (effective_config, _tunnel) = setup_ssh_tunnel_if_enabled(config).await?;
     let table = table.to_string();
 
-    match config.db_type {
+    match effective_config.db_type {
         DatabaseType::SQLite => {
-            task::spawn_blocking(move || get_sqlite_primary_key(&config, &table))
+            task::spawn_blocking(move || get_sqlite_primary_key(&effective_config, &table))
                 .await
                 .map_err(|e| DbError::Query(format!("任务执行失败: {}", e)))?
         }
-        DatabaseType::PostgreSQL => get_postgres_primary_key(&config, &table).await,
-        DatabaseType::MySQL => get_mysql_primary_key(&config, &table).await,
+        DatabaseType::PostgreSQL => get_postgres_primary_key(&effective_config, &table).await,
+        DatabaseType::MySQL => get_mysql_primary_key(&effective_config, &table).await,
     }
 }
 
@@ -95,21 +102,68 @@ pub async fn get_primary_key_column(
 /// # Returns
 /// 成功返回查询结果，失败返回错误
 pub async fn execute_query(config: &ConnectionConfig, sql: &str) -> Result<QueryResult, DbError> {
-    let config = config.clone();
+    // 如果启用了 SSH 隧道，先建立隧道并修改连接配置
+    let (effective_config, _tunnel) = setup_ssh_tunnel_if_enabled(config).await?;
     let sql = sql.to_string();
 
-    match config.db_type {
-        DatabaseType::SQLite => task::spawn_blocking(move || execute_sqlite(&config, &sql))
+    match effective_config.db_type {
+        DatabaseType::SQLite => task::spawn_blocking(move || execute_sqlite(&effective_config, &sql))
             .await
             .map_err(|e| DbError::Query(format!("任务执行失败: {}", e)))?,
-        DatabaseType::PostgreSQL => execute_postgres(&config, &sql).await,
-        DatabaseType::MySQL => execute_mysql(&config, &sql).await,
+        DatabaseType::PostgreSQL => execute_postgres(&effective_config, &sql).await,
+        DatabaseType::MySQL => execute_mysql(&effective_config, &sql).await,
     }
 }
 
 // ============================================================================
 // 辅助函数
 // ============================================================================
+
+/// 如果启用了 SSH 隧道，建立隧道并返回修改后的连接配置
+///
+/// 返回 (有效配置, 可选的隧道引用)
+/// 隧道引用需要在连接期间保持存活
+async fn setup_ssh_tunnel_if_enabled(
+    config: &ConnectionConfig,
+) -> Result<(ConnectionConfig, Option<Arc<SshTunnel>>), DbError> {
+    // SQLite 不需要 SSH 隧道
+    if matches!(config.db_type, DatabaseType::SQLite) {
+        return Ok((config.clone(), None));
+    }
+
+    // 检查是否启用了 SSH 隧道
+    if !config.ssh_config.enabled {
+        return Ok((config.clone(), None));
+    }
+
+    // 验证 SSH 配置
+    config
+        .ssh_config
+        .validate()
+        .map_err(|e| DbError::Connection(format!("SSH 配置无效: {}", e)))?;
+
+    // 创建隧道标识符（基于配置生成唯一名称）
+    let tunnel_name = format!(
+        "{}:{}->{}:{}",
+        config.ssh_config.ssh_host,
+        config.ssh_config.ssh_port,
+        config.ssh_config.remote_host,
+        config.ssh_config.remote_port
+    );
+
+    // 获取或创建隧道
+    let tunnel = SSH_TUNNEL_MANAGER
+        .get_or_create(&tunnel_name, &config.ssh_config)
+        .await
+        .map_err(|e| DbError::Connection(format!("SSH 隧道建立失败: {}", e)))?;
+
+    // 修改连接配置，使用隧道的本地端口
+    let mut effective_config = config.clone();
+    effective_config.host = "127.0.0.1".to_string();
+    effective_config.port = tunnel.local_port();
+
+    Ok((effective_config, Some(tunnel)))
+}
 
 /// 判断 SQL 是否为查询语句（返回结果集）
 #[inline]

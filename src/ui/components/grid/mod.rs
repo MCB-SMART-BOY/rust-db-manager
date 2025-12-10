@@ -5,7 +5,7 @@
 //! ## 模块结构
 //! - `state`: 表格状态管理
 //! - `mode`: 编辑模式定义
-//! - `filter`: 筛选条件
+//! - `filter`: 筛选条件（拆分为多个子模块）
 //! - `keyboard`: 键盘输入处理
 //! - `render`: 单元格渲染
 //! - `actions`: 操作和 SQL 生成
@@ -86,12 +86,17 @@ impl DataGrid {
         Self::show_save_confirm_dialog(ui.ctx(), state, &mut actions);
 
         // 显示快速筛选对话框
-        if let Some(new_filter) = filter::show_quick_filter_dialog(ui.ctx(), state, &result.columns) {
+        if let Some(new_filter) = filter::show_quick_filter_dialog(
+            ui.ctx(),
+            &mut state.show_quick_filter,
+            &mut state.quick_filter_input,
+            &result.columns,
+        ) {
             state.filters.push(new_filter);
         }
 
         // 显示筛选栏（修改筛选条件时会使缓存失效）
-        let filter_changed = filter::show_filter_bar(ui, result, state);
+        let filter_changed = filter::show_filter_bar(ui, result, &mut state.filters);
         if filter_changed {
             state.filter_cache.invalidate();
         }
@@ -99,7 +104,13 @@ impl DataGrid {
         ui.add_space(4.0);
 
         // 过滤行（使用缓存）
-        let filtered_rows = filter::filter_rows_cached(result, search_text, search_column, state);
+        let filtered_rows = filter::filter_rows_cached(
+            result,
+            search_text,
+            search_column,
+            &state.filters,
+            &mut state.filter_cache,
+        );
         let filtered_count = filtered_rows.len();
         let total_count = result.rows.len();
 
@@ -419,8 +430,7 @@ impl DataGrid {
             // 计算宽度：字符数 * 字符宽度 + 内边距
             let padding = 24.0; // 左右内边距 + 筛选按钮空间
             let width = (max_len as f32 * CHAR_WIDTH + padding)
-                .max(MIN_COL_WIDTH)
-                .min(MAX_COL_WIDTH);
+                .clamp(MIN_COL_WIDTH, MAX_COL_WIDTH);
 
             col_widths.push(width);
         }
@@ -506,7 +516,7 @@ impl DataGrid {
         let delete_count = state.rows_to_delete.len();
         let total_count = state.pending_sql.len();
 
-        egui::Window::new("⚠ 确认保存")
+        egui::Window::new("确认保存")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -517,10 +527,10 @@ impl DataGrid {
 
                     // 显示操作统计
                     ui.horizontal(|ui| {
-                        ui.label(format!("• 将删除 {} 行数据", delete_count));
+                        ui.label(format!("将删除 {} 行数据", delete_count));
                     });
                     ui.horizontal(|ui| {
-                        ui.label(format!("• 共 {} 条 SQL 语句", total_count));
+                        ui.label(format!("共 {} 条 SQL 语句", total_count));
                     });
 
                     ui.add_space(8.0);

@@ -1,8 +1,80 @@
-//! 数据导出对话框
+//! 数据导出对话框 - 支持多种格式和自定义选项
 
 use crate::core::ExportFormat;
-use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD, SPACING_LG};
-use egui::{self, Color32, RichText, Rounding};
+use crate::database::QueryResult;
+use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD};
+use egui::{self, Color32, RichText, Rounding, ScrollArea, TextEdit};
+
+/// 导出配置
+#[derive(Clone)]
+pub struct ExportConfig {
+    /// 导出格式
+    pub format: ExportFormat,
+    /// 选中的列索引
+    pub selected_columns: Vec<bool>,
+    /// 行数限制 (0 = 全部)
+    pub row_limit: usize,
+    /// 起始行 (0-based)
+    pub start_row: usize,
+    /// CSV: 分隔符
+    pub csv_delimiter: char,
+    /// CSV: 是否包含表头
+    pub csv_include_header: bool,
+    /// CSV: 引用字符
+    pub csv_quote_char: char,
+    /// SQL: 是否使用事务
+    pub sql_use_transaction: bool,
+    /// SQL: 批量插入大小 (0 = 单行插入)
+    pub sql_batch_size: usize,
+    /// JSON: 是否美化输出
+    pub json_pretty: bool,
+}
+
+impl Default for ExportConfig {
+    fn default() -> Self {
+        Self {
+            format: ExportFormat::Csv,
+            selected_columns: Vec::new(),
+            row_limit: 0,
+            start_row: 0,
+            csv_delimiter: ',',
+            csv_include_header: true,
+            csv_quote_char: '"',
+            sql_use_transaction: true,
+            sql_batch_size: 100,
+            json_pretty: true,
+        }
+    }
+}
+
+impl ExportConfig {
+    /// 初始化列选择（全选）
+    pub fn init_columns(&mut self, column_count: usize) {
+        if self.selected_columns.len() != column_count {
+            self.selected_columns = vec![true; column_count];
+        }
+    }
+
+    /// 获取选中的列索引
+    pub fn get_selected_column_indices(&self) -> Vec<usize> {
+        self.selected_columns
+            .iter()
+            .enumerate()
+            .filter(|(_, &selected)| selected)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// 是否全选
+    pub fn all_columns_selected(&self) -> bool {
+        self.selected_columns.iter().all(|&s| s)
+    }
+
+    /// 选中的列数
+    pub fn selected_column_count(&self) -> usize {
+        self.selected_columns.iter().filter(|&&s| s).count()
+    }
+}
 
 pub struct ExportDialog;
 
@@ -10,138 +82,391 @@ impl ExportDialog {
     pub fn show(
         ctx: &egui::Context,
         show: &mut bool,
-        format: &mut ExportFormat,
+        config: &mut ExportConfig,
         table_name: &str,
-        on_export: &mut Option<ExportFormat>,
+        data: Option<&QueryResult>,
+        on_export: &mut Option<ExportConfig>,
         status_message: &Option<Result<String, String>>,
     ) {
         if !*show {
             return;
         }
 
-        egui::Window::new("导出数据")
+        // 初始化列选择
+        if let Some(result) = data {
+            config.init_columns(result.columns.len());
+        }
+
+        let row_count = data.map(|d| d.rows.len()).unwrap_or(0);
+        let col_count = data.map(|d| d.columns.len()).unwrap_or(0);
+
+        egui::Window::new("📤 导出数据")
             .collapsible(false)
             .resizable(false)
+            .min_width(320.0)
+            .max_width(400.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .min_width(380.0)
             .show(ctx, |ui| {
-                ui.add_space(SPACING_MD);
-
-                // 表名信息
-                ui.horizontal(|ui| {
-                    ui.add_space(SPACING_SM);
-                    ui.label(RichText::new("数据表：").color(GRAY));
-                    
-                    egui::Frame::none()
-                        .fill(Color32::from_rgba_unmultiplied(100, 150, 200, 30))
-                        .rounding(Rounding::same(4.0))
-                        .inner_margin(egui::Margin::symmetric(8.0, 3.0))
-                        .show(ui, |ui| {
-                            ui.label(RichText::new(table_name).strong());
-                        });
-                });
-
-                ui.add_space(SPACING_LG);
-
-                // 格式选择
-                ui.label(RichText::new("选择导出格式：").color(GRAY));
                 ui.add_space(SPACING_SM);
 
-                Self::show_format_options(ui, format);
+                // 顶部信息栏
+                Self::show_info_bar(ui, table_name, row_count, col_count, config);
 
-                ui.add_space(SPACING_LG);
+                ui.add_space(SPACING_SM);
+                ui.separator();
+                ui.add_space(SPACING_SM);
+
+                // 格式选择（紧凑版）
+                Self::show_format_selector(ui, config);
+
+                ui.add_space(SPACING_MD);
+
+                // 使用折叠面板组织选项
+                ScrollArea::vertical()
+                    .max_height(300.0)
+                    .show(ui, |ui| {
+                        // 导出范围
+                        Self::show_row_range(ui, config, row_count);
+                        
+                        ui.add_space(SPACING_SM);
+
+                        // 列选择（折叠）
+                        if let Some(result) = data {
+                            Self::show_column_selector(ui, config, &result.columns);
+                        }
+
+                        ui.add_space(SPACING_SM);
+
+                        // 格式特定选项（折叠）
+                        Self::show_format_options(ui, config);
+
+                        ui.add_space(SPACING_SM);
+
+                        // 导出预览（折叠）
+                        if let Some(result) = data {
+                            Self::show_preview(ui, config, result);
+                        }
+                    });
+
+                ui.add_space(SPACING_SM);
 
                 // 状态消息
                 if let Some(result) = status_message {
                     Self::show_status_message(ui, result);
-                    ui.add_space(SPACING_MD);
+                    ui.add_space(SPACING_SM);
                 }
 
                 ui.separator();
-                ui.add_space(SPACING_MD);
+                ui.add_space(SPACING_SM);
 
-                // 按钮
-                ui.horizontal(|ui| {
-                    // 取消按钮
-                    if ui.add(
-                        egui::Button::new("取消 [Esc]")
-                            .rounding(Rounding::same(6.0))
-                    ).clicked() {
-                        *show = false;
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // 导出按钮
-                        let export_btn = egui::Button::new(
-                            RichText::new("导出文件 [Enter]")
-                                .color(Color32::WHITE)
-                        )
-                        .fill(SUCCESS)
-                        .rounding(Rounding::same(6.0));
-
-                        if ui.add(export_btn).clicked() {
-                            *on_export = Some(*format);
-                        }
-                    });
-                });
+                // 底部按钮
+                Self::show_buttons(ui, show, config, on_export, row_count);
 
                 ui.add_space(SPACING_SM);
             });
     }
 
-    /// 显示格式选项
-    fn show_format_options(ui: &mut egui::Ui, format: &mut ExportFormat) {
+    /// 信息栏（紧凑版）
+    fn show_info_bar(
+        ui: &mut egui::Ui,
+        table_name: &str,
+        row_count: usize,
+        col_count: usize,
+        config: &ExportConfig,
+    ) {
         ui.horizontal(|ui| {
-            ui.add_space(SPACING_SM);
+            // 表名
+            ui.label(RichText::new("表:").small().color(GRAY));
+            ui.label(RichText::new(table_name).strong());
 
-            for (fmt, icon, name, desc) in [
-                (ExportFormat::Csv, "📊", "CSV", "兼容 Excel"),
-                (ExportFormat::Sql, "📝", "SQL", "INSERT 语句"),
-                (ExportFormat::Json, "🔧", "JSON", "Web 应用"),
+            ui.separator();
+
+            // 统计信息
+            let selected_cols = config.selected_column_count();
+            let export_rows = if config.row_limit > 0 {
+                config.row_limit.min(row_count.saturating_sub(config.start_row))
+            } else {
+                row_count.saturating_sub(config.start_row)
+            };
+
+            ui.label(RichText::new(format!(
+                "导出: {}列 × {}行",
+                selected_cols, export_rows
+            )).small().color(MUTED));
+            
+            ui.label(RichText::new(format!("(共{}×{})", col_count, row_count))
+                .small()
+                .color(MUTED));
+        });
+    }
+
+    /// 格式选择器（紧凑版）
+    fn show_format_selector(ui: &mut egui::Ui, config: &mut ExportConfig) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("格式:").color(GRAY));
+            
+            for (fmt, icon, name) in [
+                (ExportFormat::Csv, "📊", "CSV"),
+                (ExportFormat::Sql, "📝", "SQL"),
+                (ExportFormat::Json, "🔧", "JSON"),
             ] {
-                let is_selected = *format == fmt;
-                let accent = Color32::from_rgb(100, 160, 220);
-
-                let fill = if is_selected {
-                    Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 35)
-                } else {
-                    Color32::TRANSPARENT
-                };
-
-                let stroke = if is_selected {
-                    egui::Stroke::new(2.0, accent)
-                } else {
-                    egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(150, 150, 160, 40))
-                };
-
-                let response = egui::Frame::none()
-                    .fill(fill)
-                    .stroke(stroke)
-                    .rounding(Rounding::same(8.0))
-                    .inner_margin(egui::Margin::symmetric(14.0, 10.0))
-                    .show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.label(RichText::new(icon).size(20.0));
-                            ui.add_space(2.0);
-                            ui.label(RichText::new(name).strong().color(
-                                if is_selected { accent } else { GRAY }
-                            ));
-                            ui.label(RichText::new(desc).small().color(MUTED));
-                        });
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-
-                if response.clicked() {
-                    *format = fmt;
+                let is_selected = config.format == fmt;
+                let text = format!("{} {}", icon, name);
+                
+                if ui.selectable_label(is_selected, RichText::new(&text).strong()).clicked() {
+                    config.format = fmt;
                 }
-
-                ui.add_space(SPACING_SM);
             }
         });
     }
 
-    /// 显示状态消息
+    /// 导出范围
+    fn show_row_range(ui: &mut egui::Ui, config: &mut ExportConfig, total_rows: usize) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("行数:").color(GRAY));
+            
+            // 快捷按钮
+            for (label, limit) in [("全部", 0), ("100", 100), ("1000", 1000)] {
+                if ui.selectable_label(
+                    config.row_limit == limit && config.start_row == 0,
+                    label
+                ).clicked() {
+                    config.row_limit = limit;
+                    config.start_row = 0;
+                }
+            }
+            
+            ui.separator();
+            
+            // 自定义行数
+            ui.label(RichText::new("自定义:").small().color(GRAY));
+            let mut limit_str = if config.row_limit == 0 {
+                String::new()
+            } else {
+                config.row_limit.to_string()
+            };
+            if ui.add(
+                TextEdit::singleline(&mut limit_str)
+                    .desired_width(50.0)
+                    .hint_text("全部")
+            ).changed() {
+                config.row_limit = limit_str.parse().unwrap_or(0);
+            }
+            
+            ui.label(RichText::new(format!("/{}", total_rows)).small().color(MUTED));
+        });
+    }
+
+    /// 列选择器（折叠面板）
+    fn show_column_selector(ui: &mut egui::Ui, config: &mut ExportConfig, columns: &[String]) {
+        let header = format!(
+            "选择列 ({}/{})",
+            config.selected_column_count(),
+            columns.len()
+        );
+        
+        egui::CollapsingHeader::new(header)
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let all_selected = config.all_columns_selected();
+                    if ui.button(if all_selected { "取消全选" } else { "全选" }).clicked() {
+                        let new_state = !all_selected;
+                        for s in &mut config.selected_columns {
+                            *s = new_state;
+                        }
+                    }
+                });
+                
+                ui.add_space(4.0);
+                
+                // 列复选框（水平换行）
+                egui::Frame::none()
+                    .fill(Color32::from_rgba_unmultiplied(60, 60, 70, 30))
+                    .rounding(Rounding::same(4.0))
+                    .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            for (i, col_name) in columns.iter().enumerate() {
+                                if i < config.selected_columns.len() {
+                                    let display_name = if col_name.len() > 12 {
+                                        format!("{}…", &col_name[..10])
+                                    } else {
+                                        col_name.clone()
+                                    };
+                                    
+                                    ui.checkbox(&mut config.selected_columns[i], &display_name)
+                                        .on_hover_text(col_name);
+                                }
+                            }
+                        });
+                    });
+            });
+    }
+
+    /// 格式特定选项（折叠面板）
+    fn show_format_options(ui: &mut egui::Ui, config: &mut ExportConfig) {
+        let header = match config.format {
+            ExportFormat::Csv => "CSV 选项",
+            ExportFormat::Sql => "SQL 选项",
+            ExportFormat::Json => "JSON 选项",
+        };
+        
+        egui::CollapsingHeader::new(header)
+            .default_open(false)
+            .show(ui, |ui| {
+                match config.format {
+                    ExportFormat::Csv => Self::show_csv_options(ui, config),
+                    ExportFormat::Sql => Self::show_sql_options(ui, config),
+                    ExportFormat::Json => Self::show_json_options(ui, config),
+                }
+            });
+    }
+
+    /// CSV 选项
+    fn show_csv_options(ui: &mut egui::Ui, config: &mut ExportConfig) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("分隔符:").small().color(GRAY));
+            for (label, delim) in [(",", ','), (";", ';'), ("Tab", '\t'), ("|", '|')] {
+                if ui.selectable_label(config.csv_delimiter == delim, label).clicked() {
+                    config.csv_delimiter = delim;
+                }
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut config.csv_include_header, "包含表头");
+        });
+    }
+
+    /// SQL 选项
+    fn show_sql_options(ui: &mut egui::Ui, config: &mut ExportConfig) {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut config.sql_use_transaction, "事务包装");
+            
+            ui.separator();
+            
+            ui.label(RichText::new("批量:").small().color(GRAY));
+            for (label, size) in [("单行", 0), ("100", 100), ("500", 500)] {
+                if ui.selectable_label(config.sql_batch_size == size, label).clicked() {
+                    config.sql_batch_size = size;
+                }
+            }
+        });
+    }
+
+    /// JSON 选项
+    fn show_json_options(ui: &mut egui::Ui, config: &mut ExportConfig) {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut config.json_pretty, "美化输出");
+            if config.json_pretty {
+                ui.label(RichText::new("(带缩进)").small().color(MUTED));
+            } else {
+                ui.label(RichText::new("(紧凑)").small().color(MUTED));
+            }
+        });
+    }
+
+    /// 导出预览（折叠面板）
+    fn show_preview(ui: &mut egui::Ui, config: &ExportConfig, data: &QueryResult) {
+        egui::CollapsingHeader::new("预览")
+            .default_open(false)
+            .show(ui, |ui| {
+                let preview_text = Self::generate_preview(config, data);
+                
+                egui::Frame::none()
+                    .fill(Color32::from_rgba_unmultiplied(40, 40, 50, 60))
+                    .rounding(Rounding::same(4.0))
+                    .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+                    .show(ui, |ui| {
+                        ScrollArea::horizontal()
+                            .max_height(100.0)
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(&preview_text)
+                                        .monospace()
+                                        .size(10.0)
+                                        .color(Color32::from_rgb(180, 180, 190))
+                                );
+                            });
+                    });
+            });
+    }
+
+    /// 生成预览文本
+    fn generate_preview(config: &ExportConfig, data: &QueryResult) -> String {
+        let selected_indices = config.get_selected_column_indices();
+        if selected_indices.is_empty() {
+            return "（未选择任何列）".to_string();
+        }
+
+        let preview_rows = 3.min(data.rows.len());
+        let selected_cols: Vec<&String> = selected_indices
+            .iter()
+            .filter_map(|&i| data.columns.get(i))
+            .collect();
+
+        match config.format {
+            ExportFormat::Csv => {
+                let mut lines = Vec::new();
+                if config.csv_include_header {
+                    lines.push(selected_cols.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(&config.csv_delimiter.to_string()));
+                }
+                for row in data.rows.iter().skip(config.start_row).take(preview_rows) {
+                    let values: Vec<&str> = selected_indices
+                        .iter()
+                        .filter_map(|&i| row.get(i).map(|s| s.as_str()))
+                        .collect();
+                    lines.push(values.join(&config.csv_delimiter.to_string()));
+                }
+                if data.rows.len() > preview_rows {
+                    lines.push(format!("... (+{} 行)", data.rows.len() - preview_rows));
+                }
+                lines.join("\n")
+            }
+            ExportFormat::Sql => {
+                let mut lines = Vec::new();
+                let cols_str = selected_cols.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(", ");
+                for row in data.rows.iter().skip(config.start_row).take(preview_rows.min(2)) {
+                    let values: Vec<String> = selected_indices
+                        .iter()
+                        .filter_map(|&i| row.get(i))
+                        .map(|v| if v == "NULL" { "NULL".to_string() } else { format!("'{}'", v) })
+                        .collect();
+                    lines.push(format!("INSERT INTO `t` ({}) VALUES ({});", cols_str, values.join(", ")));
+                }
+                if data.rows.len() > 2 {
+                    lines.push(format!("... (+{} 条)", data.rows.len() - 2));
+                }
+                lines.join("\n")
+            }
+            ExportFormat::Json => {
+                let mut items = Vec::new();
+                for row in data.rows.iter().skip(config.start_row).take(2) {
+                    let obj: Vec<String> = selected_indices
+                        .iter()
+                        .zip(selected_cols.iter())
+                        .filter_map(|(&i, col)| {
+                            row.get(i).map(|v| {
+                                if v == "NULL" {
+                                    format!("\"{}\": null", col)
+                                } else {
+                                    format!("\"{}\": \"{}\"", col, v)
+                                }
+                            })
+                        })
+                        .collect();
+                    items.push(format!("{{ {} }}", obj.join(", ")));
+                }
+                if data.rows.len() > 2 {
+                    items.push(format!("... (+{} 条)", data.rows.len() - 2));
+                }
+                format!("[{}]", items.join(", "))
+            }
+        }
+    }
+
+    /// 状态消息
     fn show_status_message(ui: &mut egui::Ui, result: &Result<String, String>) {
         let (icon, message, color, bg_color) = match result {
             Ok(msg) => ("✓", msg.as_str(), SUCCESS, Color32::from_rgba_unmultiplied(82, 196, 106, 25)),
@@ -150,14 +475,47 @@ impl ExportDialog {
 
         egui::Frame::none()
             .fill(bg_color)
-            .rounding(Rounding::same(6.0))
-            .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+            .rounding(Rounding::same(4.0))
+            .inner_margin(egui::Margin::symmetric(8.0, 4.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(icon).color(color));
-                    ui.add_space(SPACING_SM);
-                    ui.label(RichText::new(message).color(color));
+                    ui.label(RichText::new(message).small().color(color));
                 });
             });
+    }
+
+    /// 底部按钮
+    fn show_buttons(
+        ui: &mut egui::Ui,
+        show: &mut bool,
+        config: &ExportConfig,
+        on_export: &mut Option<ExportConfig>,
+        row_count: usize,
+    ) {
+        let can_export = config.selected_column_count() > 0 && row_count > 0;
+
+        ui.horizontal(|ui| {
+            if ui.button("取消").clicked() {
+                *show = false;
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let btn_text = format!("导出 {}", config.format.display_name());
+                let export_btn = egui::Button::new(
+                    RichText::new(&btn_text)
+                        .color(if can_export { Color32::WHITE } else { GRAY })
+                )
+                .fill(if can_export { SUCCESS } else { Color32::from_rgb(80, 80, 90) });
+
+                if ui.add_enabled(can_export, export_btn).clicked() {
+                    *on_export = Some(config.clone());
+                }
+
+                if !can_export {
+                    ui.label(RichText::new("请选择列").small().color(DANGER));
+                }
+            });
+        });
     }
 }

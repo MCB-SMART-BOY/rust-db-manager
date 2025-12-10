@@ -44,7 +44,7 @@ fn main() -> eframe::Result<()> {
             setup_fonts(&cc.egui_ctx);
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
-            Box::new(DbManagerApp::new(cc))
+            Ok(Box::new(DbManagerApp::new(cc)))
         }),
     )
 }

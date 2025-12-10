@@ -77,7 +77,7 @@ impl HelpDialog {
                 ui.separator();
 
                 ScrollArea::vertical()
-                    .id_source("help_scroll")
+                    .id_salt("help_scroll")
                     .auto_shrink([false, false])
                     .vertical_scroll_offset(*scroll_offset)
                     .show(ui, |ui| {

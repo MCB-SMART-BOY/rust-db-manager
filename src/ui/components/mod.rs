@@ -3,10 +3,12 @@
 //! 包含所有可重用的 UI 组件
 
 mod grid;
+mod query_tabs;
 mod search_bar;
 mod sql_editor;
 mod toolbar;
 mod welcome;
+
 // 工具栏
 pub use toolbar::{Toolbar, ToolbarActions};
 
@@ -21,3 +23,6 @@ pub use grid::{quote_identifier, ColumnFilter, DataGrid, DataGridState};
 
 // 欢迎页面
 pub use welcome::Welcome;
+
+// 多 Tab 查询窗口
+pub use query_tabs::{QueryTabBar, QueryTabManager};

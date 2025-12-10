@@ -1,6 +1,6 @@
 //! 数据库连接对话框
 
-use crate::database::{ConnectionConfig, DatabaseType};
+use crate::database::{ConnectionConfig, DatabaseType, MySqlSslMode, SshAuthMethod};
 use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD, SPACING_LG};
 use egui::{self, Color32, RichText, Rounding, TextEdit};
 use std::path::Path;
@@ -113,6 +113,18 @@ impl ConnectionDialog {
                 Self::show_connection_form(ui, config);
 
                 ui.add_space(SPACING_LG);
+
+                // MySQL SSL 配置
+                if matches!(config.db_type, DatabaseType::MySQL) {
+                    Self::show_mysql_ssl_config(ui, config);
+                    ui.add_space(SPACING_LG);
+                }
+
+                // SSH 隧道配置（仅对非 SQLite 显示）
+                if !matches!(config.db_type, DatabaseType::SQLite) {
+                    Self::show_ssh_tunnel_config(ui, config);
+                    ui.add_space(SPACING_LG);
+                }
 
                 // 连接字符串预览
                 Self::show_connection_preview(ui, config);
@@ -293,6 +305,227 @@ impl ConnectionDialog {
                 DatabaseType::MySQL => "默认端口 3306，连接后可选择数据库",
             };
             ui.label(RichText::new(tip).small().color(MUTED));
+        });
+    }
+
+    /// MySQL SSL 配置
+    fn show_mysql_ssl_config(ui: &mut egui::Ui, config: &mut ConnectionConfig) {
+        ui.collapsing("🔐 SSL/TLS 加密", |ui| {
+            ui.add_space(SPACING_SM);
+
+            egui::Frame::none()
+                .fill(Color32::from_rgba_unmultiplied(100, 100, 110, 10))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(16.0, 12.0))
+                .show(ui, |ui| {
+                    egui::Grid::new("mysql_ssl_form")
+                        .num_columns(2)
+                        .spacing([16.0, 8.0])
+                        .show(ui, |ui| {
+                            // SSL 模式选择
+                            ui.label(RichText::new("SSL 模式").color(GRAY));
+                            egui::ComboBox::new("ssl_mode_combo", "")
+                                .selected_text(config.mysql_ssl_mode.display_name())
+                                .show_ui(ui, |ui| {
+                                    for mode in MySqlSslMode::all() {
+                                        let label = format!(
+                                            "{} - {}",
+                                            mode.display_name(),
+                                            mode.description()
+                                        );
+                                        ui.selectable_value(
+                                            &mut config.mysql_ssl_mode,
+                                            mode.clone(),
+                                            label,
+                                        );
+                                    }
+                                });
+                            ui.end_row();
+
+                            // CA 证书路径（仅在 VerifyCa 或 VerifyIdentity 模式下显示）
+                            if matches!(
+                                config.mysql_ssl_mode,
+                                MySqlSslMode::VerifyCa | MySqlSslMode::VerifyIdentity
+                            ) {
+                                ui.label(RichText::new("CA 证书").color(GRAY));
+                                ui.horizontal(|ui| {
+                                    ui.add(
+                                        TextEdit::singleline(&mut config.ssl_ca_cert)
+                                            .hint_text("/path/to/ca-cert.pem")
+                                            .desired_width(160.0),
+                                    );
+                                    if ui.button("浏览").clicked() {
+                                        if let Some(path) = rfd::FileDialog::new()
+                                            .add_filter("证书文件", &["pem", "crt", "cer"])
+                                            .add_filter("所有文件", &["*"])
+                                            .pick_file()
+                                        {
+                                            config.ssl_ca_cert = path.display().to_string();
+                                        }
+                                    }
+                                });
+                                ui.end_row();
+                            }
+                        });
+
+                    ui.add_space(SPACING_SM);
+
+                    // SSL 模式说明
+                    let tip = match config.mysql_ssl_mode {
+                        MySqlSslMode::Disabled => "不使用加密，数据以明文传输",
+                        MySqlSslMode::Preferred => "优先使用 SSL，如果服务器不支持则回退到明文",
+                        MySqlSslMode::Required => "必须使用 SSL 加密，不验证服务器证书",
+                        MySqlSslMode::VerifyCa => "验证服务器 CA 证书，不检查主机名",
+                        MySqlSslMode::VerifyIdentity => "完整验证：检查 CA 证书和服务器主机名",
+                    };
+                    ui.label(RichText::new(tip).small().color(MUTED));
+                });
+        });
+    }
+
+    /// SSH 隧道配置
+    fn show_ssh_tunnel_config(ui: &mut egui::Ui, config: &mut ConnectionConfig) {
+        ui.collapsing("🔒 SSH 隧道（可选）", |ui| {
+            ui.add_space(SPACING_SM);
+
+            egui::Frame::none()
+                .fill(Color32::from_rgba_unmultiplied(100, 100, 110, 10))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(16.0, 12.0))
+                .show(ui, |ui| {
+                    // 启用 SSH 隧道
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut config.ssh_config.enabled, "");
+                        ui.label(RichText::new("启用 SSH 隧道").color(GRAY));
+                    });
+
+                    if config.ssh_config.enabled {
+                        ui.add_space(SPACING_SM);
+
+                        egui::Grid::new("ssh_tunnel_form")
+                            .num_columns(2)
+                            .spacing([16.0, 8.0])
+                            .show(ui, |ui| {
+                                // SSH 主机
+                                ui.label(RichText::new("SSH 主机").color(GRAY));
+                                ui.add(
+                                    TextEdit::singleline(&mut config.ssh_config.ssh_host)
+                                        .hint_text("跳板机地址")
+                                        .desired_width(200.0),
+                                );
+                                ui.end_row();
+
+                                // SSH 端口
+                                ui.label(RichText::new("SSH 端口").color(GRAY));
+                                let mut port_str = config.ssh_config.ssh_port.to_string();
+                                if ui.add(
+                                    TextEdit::singleline(&mut port_str)
+                                        .desired_width(80.0),
+                                ).changed() {
+                                    if let Ok(port) = port_str.parse::<u16>() {
+                                        config.ssh_config.ssh_port = port;
+                                    }
+                                }
+                                ui.end_row();
+
+                                // SSH 用户名
+                                ui.label(RichText::new("SSH 用户名").color(GRAY));
+                                ui.add(
+                                    TextEdit::singleline(&mut config.ssh_config.ssh_username)
+                                        .hint_text("用户名")
+                                        .desired_width(200.0),
+                                );
+                                ui.end_row();
+
+                                // 认证方式
+                                ui.label(RichText::new("认证方式").color(GRAY));
+                                ui.horizontal(|ui| {
+                                    ui.selectable_value(
+                                        &mut config.ssh_config.auth_method,
+                                        SshAuthMethod::Password,
+                                        "密码",
+                                    );
+                                    ui.selectable_value(
+                                        &mut config.ssh_config.auth_method,
+                                        SshAuthMethod::PrivateKey,
+                                        "私钥",
+                                    );
+                                });
+                                ui.end_row();
+
+                                // 密码或私钥
+                                match config.ssh_config.auth_method {
+                                    SshAuthMethod::Password => {
+                                        ui.label(RichText::new("SSH 密码").color(GRAY));
+                                        ui.add(
+                                            TextEdit::singleline(&mut config.ssh_config.ssh_password)
+                                                .password(true)
+                                                .desired_width(200.0),
+                                        );
+                                        ui.end_row();
+                                    }
+                                    SshAuthMethod::PrivateKey => {
+                                        ui.label(RichText::new("私钥路径").color(GRAY));
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                TextEdit::singleline(&mut config.ssh_config.private_key_path)
+                                                    .hint_text("~/.ssh/id_rsa")
+                                                    .desired_width(160.0),
+                                            );
+                                            if ui.button("浏览").clicked() {
+                                                if let Some(path) = rfd::FileDialog::new()
+                                                    .add_filter("私钥文件", &["pem", "key", "*"])
+                                                    .pick_file()
+                                                {
+                                                    config.ssh_config.private_key_path = path.display().to_string();
+                                                }
+                                            }
+                                        });
+                                        ui.end_row();
+
+                                        ui.label(RichText::new("私钥密码").color(GRAY));
+                                        ui.add(
+                                            TextEdit::singleline(&mut config.ssh_config.private_key_passphrase)
+                                                .password(true)
+                                                .hint_text("（可选）")
+                                                .desired_width(200.0),
+                                        );
+                                        ui.end_row();
+                                    }
+                                }
+
+                                // 远程数据库地址（从 SSH 服务器视角）
+                                ui.label(RichText::new("远程主机").color(GRAY));
+                                ui.add(
+                                    TextEdit::singleline(&mut config.ssh_config.remote_host)
+                                        .hint_text("数据库主机（如 127.0.0.1）")
+                                        .desired_width(200.0),
+                                );
+                                ui.end_row();
+
+                                // 远程端口
+                                ui.label(RichText::new("远程端口").color(GRAY));
+                                let mut remote_port_str = config.ssh_config.remote_port.to_string();
+                                if ui.add(
+                                    TextEdit::singleline(&mut remote_port_str)
+                                        .hint_text("数据库端口")
+                                        .desired_width(80.0),
+                                ).changed() {
+                                    if let Ok(port) = remote_port_str.parse::<u16>() {
+                                        config.ssh_config.remote_port = port;
+                                    }
+                                }
+                                ui.end_row();
+                            });
+
+                        ui.add_space(SPACING_SM);
+                        ui.label(
+                            RichText::new("提示：启用 SSH 隧道后，连接将通过跳板机转发到远程数据库")
+                                .small()
+                                .color(MUTED),
+                        );
+                    }
+                });
         });
     }
 

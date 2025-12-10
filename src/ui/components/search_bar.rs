@@ -29,7 +29,7 @@ impl SearchBar {
                 ui.label("列:");
 
                 let selected_text = search_column.as_deref().unwrap_or("全部列");
-                egui::ComboBox::from_id_source("search_column")
+                egui::ComboBox::new("search_column", "")
                     .selected_text(selected_text)
                     .show_ui(ui, |ui| {
                         if ui

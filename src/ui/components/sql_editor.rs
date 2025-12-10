@@ -6,7 +6,7 @@
 
 use crate::core::{highlight_sql, AutoComplete, CompletionKind, HighlightColors};
 use crate::ui::styles::GRAY;
-use egui::{self, Color32, Key, RichText, ScrollArea, TextEdit};
+use egui::{self, Color32, Key, PopupCloseBehavior, RichText, ScrollArea, TextEdit};
 
 pub struct SqlEditor;
 
@@ -149,7 +149,7 @@ impl SqlEditor {
                                 egui::Layout::top_down(egui::Align::RIGHT),
                                 |ui| {
                                     ScrollArea::vertical()
-                                        .id_source("line_numbers")
+                                        .id_salt("line_numbers")
                                         .auto_shrink([false, false])
                                         .show(ui, |ui| {
                                             ui.label(
@@ -169,7 +169,7 @@ impl SqlEditor {
                             };
 
                             ScrollArea::vertical()
-                                .id_source("sql_editor")
+                                .id_salt("sql_editor")
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
                                     let response = ui.add_sized(
@@ -246,7 +246,7 @@ impl SqlEditor {
                         // 历史列表
                         let history_height = ui.available_height();
                         ScrollArea::vertical()
-                            .id_source("history_list")
+                            .id_salt("history_list")
                             .auto_shrink([false, false])
                             .max_height(history_height)
                             .show(ui, |ui| {
@@ -424,7 +424,7 @@ impl SqlEditor {
 
         if *show_autocomplete && !completions.is_empty() {
             let popup_id = ui.make_persistent_id("autocomplete_popup");
-            egui::popup::popup_below_widget(ui, popup_id, response, |ui| {
+            egui::popup::popup_below_widget(ui, popup_id, response, PopupCloseBehavior::CloseOnClickOutside, |ui| {
                 ui.set_min_width(200.0);
                 ui.set_max_height(150.0);
 
