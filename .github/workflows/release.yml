@@ -68,7 +68,7 @@ jobs:
           path: ${{ matrix.artifact }}
 
   build-appimage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -79,15 +79,30 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxdo-dev libfuse2 file
+          sudo apt-get install -y libgtk-3-dev libxdo-dev libfuse2 file wget
 
-      - name: Install cargo-appimage
-        run: cargo install cargo-appimage
+      - name: Build binary
+        run: cargo build --release
+
+      - name: Download linuxdeploy
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+
+      - name: Create AppDir structure
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          cp target/release/gridix AppDir/usr/bin/
+          cp gridix.desktop AppDir/usr/share/applications/gridix.desktop
+          cp gridix.png AppDir/usr/share/icons/hicolor/256x256/apps/gridix.png
 
       - name: Build AppImage
         run: |
-          cargo appimage
-          mv target/appimage/*.AppImage gridix.AppImage
+          export VERSION=${{ github.ref_name }}
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage --desktop-file gridix.desktop --icon-file gridix.png
+          mv Gridix*.AppImage gridix.AppImage || mv *.AppImage gridix.AppImage
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
