@@ -122,6 +122,8 @@ pub struct DbManagerApp {
     import_state: ui::ImportState,
     /// 是否显示历史面板
     show_history_panel: bool,
+    /// 历史面板状态
+    history_panel_state: ui::HistoryPanelState,
     /// 是否显示删除确认对话框
     show_delete_confirm: bool,
     /// 待删除的连接名
@@ -249,6 +251,7 @@ impl DbManagerApp {
             show_import_dialog: false,
             import_state: ui::ImportState::new(),
             show_history_panel: false,
+            history_panel_state: ui::HistoryPanelState::default(),
             show_delete_confirm: false,
             pending_delete_name: None,
             theme_manager,
@@ -702,6 +705,7 @@ impl eframe::App for DbManagerApp {
             &self.query_history,
             &mut history_selected_sql,
             &mut clear_history,
+            &mut self.history_panel_state,
         );
 
         if let Some(sql) = history_selected_sql {

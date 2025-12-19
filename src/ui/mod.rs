@@ -26,7 +26,7 @@ pub use dialogs::{
     // 导入对话框
     parse_sql_file, ImportAction, ImportDialog, ImportFormat, ImportPreview, ImportState,
 };
-pub use panels::{HistoryPanel, Sidebar, SidebarActions, SidebarFocusTransfer};
+pub use panels::{HistoryPanel, HistoryPanelState, Sidebar, SidebarActions, SidebarFocusTransfer};
 
 /// 全局焦点区域
 /// 
