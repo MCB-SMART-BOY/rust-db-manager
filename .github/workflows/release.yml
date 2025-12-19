@@ -79,15 +79,16 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxdo-dev libfuse2 file wget
+          sudo apt-get install -y libgtk-3-dev libxdo-dev file wget
 
       - name: Build binary
         run: cargo build --release
 
-      - name: Download linuxdeploy
+      - name: Download AppImage tools
         run: |
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage appimagetool-x86_64.AppImage
 
       - name: Create AppDir structure
         run: |
@@ -97,12 +98,32 @@ jobs:
           cp target/release/gridix AppDir/usr/bin/
           cp gridix.desktop AppDir/usr/share/applications/gridix.desktop
           cp gridix.png AppDir/usr/share/icons/hicolor/256x256/apps/gridix.png
+          # Create AppRun
+          cat > AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/usr/bin/gridix" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          # Create symlinks
+          ln -sf usr/share/applications/gridix.desktop AppDir/gridix.desktop
+          ln -sf usr/share/icons/hicolor/256x256/apps/gridix.png AppDir/gridix.png
+
+      - name: Bundle libraries
+        run: |
+          # Extract linuxdeploy and use it
+          ./linuxdeploy-x86_64.AppImage --appimage-extract
+          ./squashfs-root/AppRun --appdir AppDir
 
       - name: Build AppImage
         run: |
+          # Extract appimagetool and use it
+          ./appimagetool-x86_64.AppImage --appimage-extract
           export VERSION=${{ github.ref_name }}
-          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage --desktop-file gridix.desktop --icon-file gridix.png
-          mv Gridix*.AppImage gridix.AppImage || mv *.AppImage gridix.AppImage
+          ./squashfs-root/AppRun AppDir gridix.AppImage
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
