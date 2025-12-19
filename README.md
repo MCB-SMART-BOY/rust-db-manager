@@ -2,7 +2,7 @@
 
 简洁、快速、安全的跨平台数据库管理工具，专为键盘党打造。
 
-![Version](https://img.shields.io/badge/version-0.3.0-green.svg)
+![Version](https://img.shields.io/badge/version-0.5.0-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
@@ -341,6 +341,22 @@ cargo appimage
 ```
 
 ## 更新日志
+
+### v0.5.0 (2024-12-20)
+- 新增完整的 Helix 键盘操作文档 (`docs/KEYBINDINGS.md`)
+- 新增历史面板 Helix 键盘导航（j/k/g/G/Enter/Esc）
+- 对话框焦点管理优化（打开对话框时禁用其他区域键盘响应）
+- 数据表格列宽智能自适应（根据内容自动计算，区分中英文字符宽度）
+- 列宽限制：最小 60px，最大 400px
+- 统一所有界面组件的操作逻辑
+
+### v0.4.0 (2024-12-18)
+- 新增对话框统一键盘导航模块
+- 所有对话框支持 Esc/q 关闭、Enter 确认
+- 确认对话框支持 y/n 快捷键
+- 导出/导入对话框支持数字键切换格式
+- 新建表对话框支持 o/O 添加列、dd 删除列
+- GitHub Actions 自动构建跨平台 Release
 
 ### v0.3.0 (2024-12-15)
 - 新增侧边栏键盘导航（Ctrl+1/2/3 快速切换连接/数据库/表）
