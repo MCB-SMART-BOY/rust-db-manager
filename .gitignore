@@ -18,3 +18,7 @@ releases/
 
 # AppImage build artifacts
 libs/
+
+# External packaging repositories (independent git repos)
+packaging/aur/
+packaging/homebrew/

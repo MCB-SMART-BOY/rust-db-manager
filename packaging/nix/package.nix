@@ -11,7 +11,7 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "gridix";
-  version = "0.5.1";
+  version = "0.5.2";
 
   src = fetchFromGitHub {
     owner = "MCB-SMART-BOY";
@@ -20,7 +20,8 @@ rustPlatform.buildRustPackage rec {
     hash = "sha256-E44kvbXNj4+rqj6ahnR0eoV+VTys9t/f92hqQgdnZZc=";
   };
 
-  cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  # Run `nix build` to get the correct hash, then update this value
+  cargoHash = lib.fakeHash;
 
   nativeBuildInputs = [
     pkg-config
