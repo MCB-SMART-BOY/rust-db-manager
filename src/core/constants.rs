@@ -26,6 +26,18 @@ pub mod database {
     pub const LARGE_RESULT_SET_WARNING_THRESHOLD: usize = 10000;
     /// 最大结果集行数限制（防止内存溢出）
     pub const MAX_RESULT_SET_ROWS: usize = 100000;
+    
+    /// 连接池相关常量
+    pub mod pool {
+        /// 最大缓存的 MySQL 连接池数量
+        pub const MAX_MYSQL_POOLS: usize = 20;
+        /// 最大缓存的 PostgreSQL 客户端数量
+        pub const MAX_POSTGRES_CLIENTS: usize = 20;
+        /// MySQL 连接池最小连接数
+        pub const MYSQL_POOL_MIN_CONNECTIONS: usize = 2;
+        /// MySQL 连接池最大连接数
+        pub const MYSQL_POOL_MAX_CONNECTIONS: usize = 10;
+    }
 }
 
 /// UI 相关常量

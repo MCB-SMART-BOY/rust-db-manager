@@ -28,97 +28,138 @@ use message::Message;
 /// 数据库管理器主应用结构体
 ///
 /// 管理所有应用状态，包括数据库连接、查询结果、UI 状态等。
+/// 实现了 `eframe::App` trait，作为 GUI 应用程序的入口点。
+///
+/// # 架构概述
+///
+/// - **连接管理**: 支持 SQLite、PostgreSQL、MySQL 三种数据库
+/// - **异步执行**: 使用 tokio runtime 异步执行查询，避免阻塞 UI
+/// - **消息通道**: 通过 mpsc 通道在异步任务和 UI 线程间通信
+/// - **多 Tab 支持**: 支持同时打开多个查询标签页
+///
+/// # 状态分组
+///
+/// 字段按功能分为以下几组：
+/// - 连接管理：数据库连接状态和配置
+/// - 查询状态：SQL 编辑器、执行结果
+/// - 异步通信：消息通道和运行时
+/// - 配置历史：应用配置和查询历史
+/// - UI 状态：对话框、面板的显示状态
 pub struct DbManagerApp {
-    // 连接管理
+    // ==================== 连接管理 ====================
+    /// 数据库连接管理器，维护所有连接配置和状态
     manager: ConnectionManager,
+    /// 是否显示新建/编辑连接对话框
     show_connection_dialog: bool,
+    /// 当前编辑的连接配置（用于新建/编辑对话框）
     new_config: ConnectionConfig,
 
-    // 查询状态
+    // ==================== 查询状态 ====================
+    /// 当前选中的表名
     selected_table: Option<String>,
+    /// 当前 SQL 编辑器内容
     sql: String,
+    /// 当前查询结果
     result: Option<QueryResult>,
-    // 多 Tab 查询管理器
+    /// 多 Tab 查询管理器，支持多个独立查询
     tab_manager: QueryTabManager,
 
-    // 异步通信
+    // ==================== 异步通信 ====================
+    /// 消息发送端，用于从异步任务发送结果到 UI
     tx: Sender<Message>,
+    /// 消息接收端，UI 线程轮询获取异步结果
     rx: Receiver<Message>,
+    /// Tokio 异步运行时
     runtime: tokio::runtime::Runtime,
+    /// 是否正在建立连接
     connecting: bool,
+    /// 是否正在执行查询
     executing: bool,
 
-    // 配置和历史
+    // ==================== 配置和历史 ====================
+    /// 应用程序配置（主题、UI 缩放等）
     app_config: AppConfig,
+    /// 查询历史记录（用于历史面板）
     query_history: QueryHistory,
-
-    // 命令行历史 (当前连接的历史记录)
+    /// 当前连接的命令历史（用于 ↑/↓ 导航）
     command_history: Vec<String>,
+    /// 命令历史导航索引
     history_index: Option<usize>,
+    /// 状态栏消息（显示操作结果）
     last_message: Option<String>,
-    // 当前历史记录对应的连接名
+    /// 当前历史记录对应的连接名（用于切换连接时保存/恢复）
     current_history_connection: Option<String>,
 
-    // 搜索
+    // ==================== 搜索和选择 ====================
+    /// 表格搜索文本
     search_text: String,
+    /// 搜索限定的列名
     search_column: Option<String>,
-
-    // 表格选择
+    /// 当前选中的行索引
     selected_row: Option<usize>,
+    /// 当前选中的单元格 (行, 列)
     selected_cell: Option<(usize, usize)>,
-
-    // 表格编辑状态
+    /// 数据表格状态（筛选、排序、编辑等）
     grid_state: ui::DataGridState,
 
-    // UI 状态
+    // ==================== 对话框状态 ====================
+    /// 是否显示导出对话框
     show_export_dialog: bool,
+    /// 导出配置
     export_config: ExportConfig,
+    /// 导出操作结果
     export_status: Option<Result<String, String>>,
+    /// 是否显示导入对话框
     show_import_dialog: bool,
+    /// 导入状态（文件、预览、配置）
     import_state: ui::ImportState,
+    /// 是否显示历史面板
     show_history_panel: bool,
-
-    // 确认删除对话框
+    /// 是否显示删除确认对话框
     show_delete_confirm: bool,
+    /// 待删除的连接名
     pending_delete_name: Option<String>,
 
-    // 主题
+    // ==================== 主题和外观 ====================
+    /// 主题管理器
     theme_manager: ThemeManager,
-
-    // 语法高亮
+    /// 语法高亮颜色配置
     highlight_colors: HighlightColors,
-
-    // 查询耗时
+    /// 上次查询耗时（毫秒）
     last_query_time_ms: Option<u64>,
 
-    // 自动补全
+    // ==================== 自动补全 ====================
+    /// 自动补全引擎
     autocomplete: AutoComplete,
+    /// 是否显示自动补全列表
     show_autocomplete: bool,
+    /// 当前选中的补全项索引
     selected_completion: usize,
 
-    // SQL 编辑器显示状态
+    // ==================== UI 显示状态 ====================
+    /// SQL 编辑器是否展开显示
     show_sql_editor: bool,
-    // SQL 编辑器需要聚焦（兼容旧逻辑，后续可移除）
+    /// SQL 编辑器是否需要获取焦点
     focus_sql_editor: bool,
-    // 侧边栏显示状态
+    /// 侧边栏是否显示
     show_sidebar: bool,
-    // 全局焦点区域（控制键盘输入的接收者）
+    /// 全局焦点区域（侧边栏/SQL 编辑器/数据表格）
     focus_area: ui::FocusArea,
-    // 侧边栏焦点子区域（Ctrl+1/2/3 切换）
+    /// 侧边栏当前焦点子区域（连接/数据库/表）
     sidebar_section: ui::SidebarSection,
-    // 侧边栏导航索引（用于 j/k 键盘导航）
+    /// 侧边栏键盘导航索引
     sidebar_selected_index: usize,
-    // 帮助面板显示状态
+    /// 是否显示帮助面板
     show_help: bool,
-    // 帮助面板滚动位置
+    /// 帮助面板滚动位置
     help_scroll_offset: f32,
-    // 关于对话框显示状态
+    /// 是否显示关于对话框
     show_about: bool,
-    // UI 缩放比例
+    /// 用户设置的 UI 缩放比例
     ui_scale: f32,
-    // 基础 DPI 缩放（系统设置）
+    /// 系统基础 DPI 缩放
     base_pixels_per_point: f32,
-    // DDL 对话框状态
+    /// DDL 对话框状态（新建表等）
     ddl_dialog_state: DdlDialogState,
 }
 
@@ -733,7 +774,7 @@ impl DbManagerApp {
     fn execute_import(&mut self) {
         use crate::core::{import_csv_to_sql, import_json_to_sql, CsvImportConfig, JsonImportConfig};
         
-        let Some(ref path) = self.import_state.file_path.clone() else {
+        let Some(ref path) = self.import_state.file_path else {
             return;
         };
         
@@ -757,7 +798,7 @@ impl DbManagerApp {
                     ..Default::default()
                 };
                 
-                match import_csv_to_sql(&path, &config, is_mysql) {
+                match import_csv_to_sql(path, &config, is_mysql) {
                     Ok(result) => result.sql_statements,
                     Err(e) => {
                         self.last_message = Some(format!("CSV 转换失败: {}", e));
@@ -776,7 +817,7 @@ impl DbManagerApp {
                     ..Default::default()
                 };
                 
-                match import_json_to_sql(&path, &config, is_mysql) {
+                match import_json_to_sql(path, &config, is_mysql) {
                     Ok(result) => result.sql_statements,
                     Err(e) => {
                         self.last_message = Some(format!("JSON 转换失败: {}", e));
@@ -800,34 +841,40 @@ impl DbManagerApp {
         let _stop_on_error = self.import_state.sql_config.stop_on_error;
         
         // 执行 SQL
-        let statement_count = statements.len();
+        let valid_statements: Vec<String> = statements
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        let valid_count = valid_statements.len();
         
-        // 开始事务
+        if valid_count == 0 {
+            self.last_message = Some("没有有效的 SQL 语句".to_string());
+            return;
+        }
+        
+        // 开始事务（如果启用）
         if use_transaction {
             self.execute("BEGIN".to_string());
         }
         
-        for stmt in statements {
-            if stmt.trim().is_empty() {
-                continue;
-            }
-            
-            // 简单执行（同步方式执行每条语句）
-            // 注意：这里使用异步执行会更好，但为简化实现先用同步
+        // 批量执行所有语句
+        // 注意：异步执行无法同步获取每条语句的执行结果
+        // 如果发生错误，会通过消息通道异步返回并显示在状态栏
+        for stmt in valid_statements {
             self.execute(stmt);
-            
-            // TODO: 实际的错误处理需要等待执行结果
-            // 这里简化处理，假设都成功
         }
         
-        // 提交事务
+        // 提交事务（如果启用）
+        // 注意：如果中间某条语句失败，事务会由数据库自动处理
+        // 用户可以查看状态栏的错误消息来了解执行情况
         if use_transaction {
             self.execute("COMMIT".to_string());
         }
         
         self.last_message = Some(format!(
-            "导入完成: {} 条语句已执行",
-            statement_count
+            "导入中: {} 条语句已提交执行（使用事务: {}）",
+            valid_count,
+            if use_transaction { "是" } else { "否" }
         ));
         
         self.import_state.clear();

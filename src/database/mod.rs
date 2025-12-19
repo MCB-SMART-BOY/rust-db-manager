@@ -2,6 +2,7 @@
 //!
 //! 支持 SQLite、PostgreSQL、MySQL 三种数据库，使用连接池优化性能。
 
+use crate::core::constants;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -701,11 +702,13 @@ impl PoolManager {
             pools.remove(&key);
         }
 
-        // 创建新连接池，配置连接池参数（最小2，最大10连接）
+        // 创建新连接池，使用常量配置连接池参数
         let pool_opts = mysql_async::PoolOpts::default()
             .with_constraints(
-                mysql_async::PoolConstraints::new(2, 10)
-                    .expect("连接池约束无效")
+                mysql_async::PoolConstraints::new(
+                    constants::database::pool::MYSQL_POOL_MIN_CONNECTIONS,
+                    constants::database::pool::MYSQL_POOL_MAX_CONNECTIONS,
+                ).expect("连接池约束无效")
             );
         
         let mut opts = mysql_async::OptsBuilder::from_opts(
@@ -723,9 +726,18 @@ impl PoolManager {
             DbError::Connection(format!("MySQL 连接失败: {}", e))
         })?;
 
-        // 存入缓存
+        // 存入缓存（限制缓存数量，防止内存溢出）
         {
             let mut pools = self.mysql_pools.write().await;
+            
+            // 如果缓存已满，移除最早的连接池
+            if pools.len() >= constants::database::pool::MAX_MYSQL_POOLS {
+                // 移除第一个键（HashMap 无序，但这里只是简单清理）
+                if let Some(oldest_key) = pools.keys().next().cloned() {
+                    pools.remove(&oldest_key);
+                }
+            }
+            
             pools.insert(key, pool.clone());
         }
 
@@ -840,9 +852,17 @@ impl PoolManager {
 
         let client = Arc::new(client);
 
-        // 存入缓存
+        // 存入缓存（限制缓存数量，防止内存溢出）
         {
             let mut clients = self.pg_clients.write().await;
+            
+            // 如果缓存已满，移除最早的客户端
+            if clients.len() >= constants::database::pool::MAX_POSTGRES_CLIENTS {
+                if let Some(oldest_key) = clients.keys().next().cloned() {
+                    clients.remove(&oldest_key);
+                }
+            }
+            
             clients.insert(key, client.clone());
         }
 

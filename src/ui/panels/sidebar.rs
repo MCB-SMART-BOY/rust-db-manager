@@ -570,6 +570,7 @@ impl Sidebar {
     }
 
     /// 显示嵌套的表列表（在数据库下方）
+    #[allow(clippy::too_many_arguments)]
     fn show_table_list_nested(
         ui: &mut egui::Ui,
         conn_name: &str,
@@ -638,6 +639,7 @@ impl Sidebar {
     }
 
     /// 显示表列表（SQLite 模式，直接在连接下）
+    #[allow(clippy::too_many_arguments)]
     fn show_table_list(
         ui: &mut egui::Ui,
         conn_name: &str,

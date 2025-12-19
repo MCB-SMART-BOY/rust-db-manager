@@ -106,6 +106,7 @@ impl Default for CsvImportConfig {
 
 /// JSON 导入配置
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct JsonImportConfig {
     /// JSON 路径（如 "data.items"）
     pub json_path: String,
@@ -115,15 +116,6 @@ pub struct JsonImportConfig {
     pub flatten_nested: bool,
 }
 
-impl Default for JsonImportConfig {
-    fn default() -> Self {
-        Self {
-            json_path: String::new(),
-            table_name: String::new(),
-            flatten_nested: false,
-        }
-    }
-}
 
 /// 导入预览数据
 #[derive(Debug, Clone, Default)]
@@ -639,11 +631,10 @@ impl ImportDialog {
             let has_preview = state.preview.is_some();
             
             // 刷新预览按钮
-            if has_file {
-                if ui.button("🔄 刷新预览").clicked() {
+            if has_file
+                && ui.button("🔄 刷新预览").clicked() {
                     action = ImportAction::RefreshPreview;
                 }
-            }
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // 取消按钮
@@ -695,7 +686,7 @@ pub fn parse_sql_file(content: &str, config: &SqlImportConfig) -> ImportPreview 
     
     let lines: Vec<&str> = content.lines().collect();
     
-    for (_line_num, line) in lines.iter().enumerate() {
+    for line in lines.iter() {
         let mut processed_line = String::new();
         let chars: Vec<char> = line.chars().collect();
         let mut i = 0;
