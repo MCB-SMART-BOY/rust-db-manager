@@ -26,9 +26,9 @@ pub struct FilterCache {
     pub filtered_indices: Vec<usize>,
 }
 
+#[allow(dead_code)] // 公开 API，供外部使用
 impl FilterCache {
     /// 创建新的缓存
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -39,13 +39,17 @@ impl FilterCache {
     }
 
     /// 获取缓存的过滤后行数（如果缓存有效）
-    #[allow(dead_code)]
     pub fn get_filtered_count(&self) -> Option<usize> {
         if self.valid {
             Some(self.filtered_indices.len())
         } else {
             None
         }
+    }
+
+    /// 检查缓存是否有效
+    pub fn is_valid(&self) -> bool {
+        self.valid
     }
 }
 

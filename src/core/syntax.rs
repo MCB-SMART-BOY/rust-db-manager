@@ -72,7 +72,6 @@ impl HighlightCache {
         self.access_order.push(key);
     }
 
-    #[allow(dead_code)]
     fn clear(&mut self) {
         self.cache.clear();
         self.access_order.clear();
@@ -617,7 +616,6 @@ pub fn highlight_sql(text: &str, colors: &HighlightColors) -> LayoutJob {
 }
 
 /// 清除高亮缓存（在主题切换时调用）
-#[allow(dead_code)]
 pub fn clear_highlight_cache() {
     let mut cache = HIGHLIGHT_CACHE.write();
     cache.clear();

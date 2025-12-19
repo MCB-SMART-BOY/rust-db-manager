@@ -14,4 +14,6 @@ pub enum Message {
     DatabaseSelected(String, String, Result<Vec<String>, String>),
     /// 查询执行完成 (SQL语句, 查询结果, 耗时毫秒)
     QueryDone(String, Result<QueryResult, String>, u64),
+    /// 主键列获取完成 (表名, 主键列名)
+    PrimaryKeyFetched(String, Option<String>),
 }

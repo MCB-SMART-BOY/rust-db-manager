@@ -40,10 +40,10 @@ pub struct SidebarActions {
     pub focus_transfer: Option<SidebarFocusTransfer>,
 }
 
+#[allow(dead_code)] // 公开 API，供外部使用
 impl SidebarActions {
     /// 检查是否有任何操作
     #[inline]
-    #[allow(dead_code)]
     pub fn has_action(&self) -> bool {
         self.connect.is_some()
             || self.disconnect.is_some()

@@ -14,8 +14,8 @@ use tokio::sync::RwLock;
 // ============================================================================
 
 /// 数据库操作错误
+#[allow(dead_code)] // 公开 API，供外部使用
 #[derive(Error, Debug)]
-#[allow(dead_code)] // 预留错误类型供将来使用
 pub enum DbError {
     #[error("连接错误: {0}")]
     Connection(String),
@@ -36,7 +36,7 @@ pub enum DbError {
     Pool(String),
 }
 
-#[allow(dead_code)] // 预留函数供将来使用
+#[allow(dead_code)] // 公开 API，供外部使用
 impl DbError {
     /// 创建带数据库类型的连接错误
     pub fn connection_typed(db_type: &DatabaseType, message: impl Into<String>) -> Self {
@@ -126,7 +126,7 @@ impl DatabaseType {
     }
 
     /// 是否需要网络连接
-    #[allow(dead_code)]
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub const fn requires_network(&self) -> bool {
         !matches!(self, Self::SQLite)
     }
@@ -405,9 +405,9 @@ where
         .map_err(D::Error::custom)
 }
 
+#[allow(dead_code)] // 公开 API，供外部使用
 impl ConnectionConfig {
     /// 创建新的连接配置
-    #[allow(dead_code)]
     pub fn new(name: impl Into<String>, db_type: DatabaseType) -> Self {
         let db_type_clone = db_type.clone();
         Self {
@@ -474,7 +474,6 @@ impl ConnectionConfig {
     }
 
     /// 生成安全的连接字符串描述（密码遮蔽，用于日志）
-    #[allow(dead_code)]
     pub fn connection_string_masked(&self) -> String {
         match self.db_type {
             DatabaseType::SQLite => format!("sqlite://{}", self.database),
@@ -590,7 +589,6 @@ pub struct ConnectionManager {
     pub active: Option<String>,
 }
 
-#[allow(dead_code)]
 impl ConnectionManager {
     /// 添加新连接配置
     pub fn add(&mut self, config: ConnectionConfig) {
@@ -599,6 +597,7 @@ impl ConnectionManager {
     }
 
     /// 移除连接
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn remove(&mut self, name: &str) -> Option<Connection> {
         if self.active.as_deref() == Some(name) {
             self.active = None;
@@ -614,6 +613,7 @@ impl ConnectionManager {
     }
 
     /// 获取当前活动连接（可变）
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn get_active_mut(&mut self) -> Option<&mut Connection> {
         let name = self.active.clone()?;
         self.connections.get_mut(&name)
@@ -627,6 +627,7 @@ impl ConnectionManager {
     }
 
     /// 处理连接结果
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn handle_connect_result(&mut self, name: &str, result: Result<Vec<String>, String>) {
         if let Some(conn) = self.connections.get_mut(name) {
             match result {
@@ -642,11 +643,13 @@ impl ConnectionManager {
     }
 
     /// 连接数量
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn len(&self) -> usize {
         self.connections.len()
     }
 
     /// 是否为空
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn is_empty(&self) -> bool {
         self.connections.is_empty()
     }
@@ -870,7 +873,6 @@ impl PoolManager {
     }
 
     /// 清除指定配置的连接池
-    #[allow(dead_code)]
     pub async fn remove_pool(&self, config: &ConnectionConfig) {
         let key = config.pool_key();
 
@@ -893,7 +895,6 @@ impl PoolManager {
     }
 
     /// 清除所有连接池
-    #[allow(dead_code)]
     pub async fn clear_all(&self) {
         {
             let mut pools = self.mysql_pools.write().await;
@@ -928,4 +929,5 @@ pub mod ssh_tunnel;
 
 #[allow(unused_imports)] // get_primary_key_column 预留供将来使用
 pub use query::{connect_database, execute_query, get_tables_for_database, get_primary_key_column, ConnectResult};
-pub use ssh_tunnel::SshAuthMethod;
+#[allow(unused_imports)] // SshTunnelConfig 公开 API
+pub use ssh_tunnel::{SshAuthMethod, SshTunnelConfig};

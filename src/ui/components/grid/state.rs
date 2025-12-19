@@ -61,8 +61,8 @@ pub struct DataGridState {
     pub filter_cache: FilterCache,
     /// 主键列索引（None 表示未知，编辑功能将被禁用）
     pub primary_key_column: Option<usize>,
-    /// 正则表达式错误信息（用于显示给用户）
-    #[allow(dead_code)] // 预留字段供将来使用
+    /// 正则表达式错误信息（用于向用户显示正则匹配失败原因）
+    #[allow(dead_code)] // 预留字段，待实现正则错误提示 UI
     pub regex_error: Option<String>,
     /// 待处理的新增行编辑 (虚拟行索引, 列索引, 新值)
     pub pending_new_row_edit: Option<(usize, usize, String)>,

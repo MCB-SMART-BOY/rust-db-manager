@@ -1,5 +1,7 @@
 //! 关于对话框 - 显示项目信息
+//! 支持 Helix 风格的键盘导航
 
+use super::keyboard;
 use egui::{self, Color32, RichText, Vec2};
 
 pub struct AboutDialog;
@@ -9,6 +11,18 @@ impl AboutDialog {
         if !*show {
             return;
         }
+
+        // 键盘快捷键：Esc/q/Enter 关闭
+        if keyboard::handle_close_keys(ctx) {
+            *show = false;
+            return;
+        }
+        // Enter 也关闭
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::Enter) {
+                *show = false;
+            }
+        });
 
         egui::Window::new("关于")
             .collapsible(false)
@@ -91,8 +105,17 @@ impl AboutDialog {
 
                     ui.add_space(16.0);
 
+                    // 快捷键提示
+                    ui.label(
+                        RichText::new("[Esc/q/Enter 关闭]")
+                            .small()
+                            .color(Color32::GRAY)
+                    );
+                    
+                    ui.add_space(6.0);
+
                     // 关闭按钮
-                    if ui.button(RichText::new("知道啦~").size(14.0)).clicked() {
+                    if ui.button(RichText::new("知道啦~ [Enter]").size(14.0)).clicked() {
                         *show = false;
                     }
 

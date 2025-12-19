@@ -13,14 +13,17 @@
 #![allow(clippy::too_many_arguments)]
 
 mod actions;
-mod filter;
+pub mod filter;
 mod keyboard;
 mod mode;
 mod render;
 mod state;
 
-pub use actions::{quote_identifier, DataGridActions, FocusTransfer};
-pub use filter::{count_search_matches, ColumnFilter};
+pub use actions::{escape_identifier, escape_value, quote_identifier, DataGridActions, FocusTransfer};
+pub use filter::{
+    check_filter_match, count_search_matches, filter_rows_cached, ColumnFilter, FilterCache,
+    FilterLogic, FilterOperator,
+};
 pub use mode::GridMode;
 pub use state::DataGridState;
 
@@ -324,6 +327,7 @@ impl DataGrid {
         // 点击表格区域聚焦
         if table_response.response.clicked() {
             state.focused = true;
+            actions.request_focus = true;
         }
 
         (actions, (filtered_count, total_count))

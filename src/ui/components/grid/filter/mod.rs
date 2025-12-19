@@ -2,19 +2,17 @@
 //!
 //! 提供现代数据库工具风格的筛选功能，拆分为多个子模块以提高可维护性。
 
-mod operators;
+mod cache;
 mod condition;
 mod logic;
-mod ui;
-mod cache;
+mod operators;
 mod quick_filter;
+mod ui;
 
-// 重新导出公共接口（部分为预留 API）
-pub use condition::ColumnFilter;
-#[allow(unused_imports)]
-pub use logic::FilterLogic;
-#[allow(unused_imports)]
-pub use operators::FilterOperator;
-pub use ui::show_filter_bar;
+// 重新导出公共接口
 pub use cache::{count_search_matches, filter_rows_cached, FilterCache};
+pub use condition::ColumnFilter;
+pub use logic::FilterLogic;
+pub use operators::{check_filter_match, FilterOperator};
 pub use quick_filter::show_quick_filter_dialog;
+pub use ui::show_filter_bar;

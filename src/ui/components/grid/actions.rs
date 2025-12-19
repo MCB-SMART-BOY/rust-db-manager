@@ -23,6 +23,8 @@ pub struct DataGridActions {
     pub refresh_requested: bool,
     /// 请求焦点转移
     pub focus_transfer: Option<FocusTransfer>,
+    /// 表格被点击，请求获取焦点
+    pub request_focus: bool,
 }
 
 /// SQL 危险保留字（可能被用于注入攻击）
@@ -86,7 +88,7 @@ pub fn quote_identifier(name: &str, use_backticks: bool) -> Result<String, Strin
 /// 转义 SQL 字符串值
 ///
 /// 处理单引号转义，防止 SQL 注入
-fn escape_value(value: &str) -> String {
+pub fn escape_value(value: &str) -> String {
     if value == "NULL" {
         return "NULL".to_string();
     }

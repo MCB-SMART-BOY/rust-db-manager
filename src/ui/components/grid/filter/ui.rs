@@ -9,8 +9,8 @@ use crate::database::QueryResult;
 use crate::ui::styles::GRAY;
 use egui::{self, Color32, RichText, TextEdit};
 
-/// 筛选栏状态（预留供将来扩展使用）
-#[allow(dead_code)]
+/// 筛选栏状态
+#[allow(dead_code)] // 公开 API，供外部使用
 pub struct FilterBarState {
     pub filters: Vec<ColumnFilter>,
 }

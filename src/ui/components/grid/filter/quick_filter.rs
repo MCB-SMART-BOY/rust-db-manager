@@ -8,8 +8,8 @@ use super::operators::FilterOperator;
 use crate::ui::styles::GRAY;
 use egui::{self, Color32, RichText, TextEdit};
 
-/// 快速筛选对话框状态（预留供将来扩展使用）
-#[allow(dead_code)]
+/// 快速筛选对话框状态
+#[allow(dead_code)] // 公开 API，供外部使用
 #[derive(Default)]
 pub struct QuickFilterState {
     /// 是否显示对话框
@@ -18,7 +18,6 @@ pub struct QuickFilterState {
     pub input: String,
 }
 
-#[allow(dead_code)]
 /// 显示快速筛选对话框
 /// 
 /// 返回解析成功的筛选条件（如果有）

@@ -145,7 +145,7 @@ impl FilterOperator {
     }
 
     /// 获取所有操作符
-    #[allow(dead_code)]
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn all() -> Vec<FilterOperator> {
         let mut ops = Vec::new();
         ops.extend_from_slice(Self::text_operators());

@@ -6,19 +6,25 @@ pub mod panels;
 pub mod styles;
 
 // 重新导出常用组件
+#[allow(unused_imports)] // 公开 API，供外部使用
 pub use components::{
-    count_search_matches, quote_identifier, DataGrid, DataGridState, SearchBar, SqlEditor,
-    SqlEditorActions, Toolbar, ToolbarActions, Welcome,
+    // 数据表格相关
+    check_filter_match, count_search_matches, escape_identifier, escape_value,
+    filter_rows_cached, quote_identifier, ColumnFilter, DataGrid, DataGridState, FilterCache,
+    FilterLogic, FilterOperator, FocusTransfer,
+    // 其他组件
+    SearchBar, SqlEditor, SqlEditorActions, Toolbar, ToolbarActions, Welcome,
     // 多 Tab 查询
-    QueryTabBar, QueryTabManager,
-    // 焦点转移
-    FocusTransfer,
+    QueryTab, QueryTabBar, QueryTabManager,
 };
+#[allow(unused_imports)] // 公开 API，供外部使用
 pub use dialogs::{
-    AboutDialog, ConfirmDialog, ConnectionDialog, DdlDialog, DdlDialogState, ExportConfig, ExportDialog, HelpDialog,
+    // DDL 对话框
+    ColumnDefinition, ColumnType, DdlDialog, DdlDialogState, TableDefinition,
+    // 其他对话框
+    AboutDialog, ConfirmDialog, ConnectionDialog, ExportConfig, ExportDialog, HelpDialog,
     // 导入对话框
-    ImportDialog, ImportState, ImportAction, ImportPreview, ImportFormat,
-    parse_sql_file,
+    parse_sql_file, ImportAction, ImportDialog, ImportFormat, ImportPreview, ImportState,
 };
 pub use panels::{HistoryPanel, Sidebar, SidebarActions, SidebarFocusTransfer};
 
@@ -34,8 +40,8 @@ pub enum FocusArea {
     DataGrid,
     /// SQL 编辑器
     SqlEditor,
-    /// 对话框（连接、导出等模态对话框打开时）
-    #[allow(dead_code)]
+    /// 对话框（连接、导出等模态对话框打开时，预留扩展）
+    #[allow(dead_code)] // 预留变体，用于未来对话框焦点管理
     Dialog,
 }
 

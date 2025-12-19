@@ -1,7 +1,15 @@
 //! 数据导入对话框 - 支持 SQL/CSV/JSON 格式，提供预览和直接执行功能
+//!
+//! 支持的快捷键：
+//! - `Esc` - 关闭对话框
+//! - `Enter` - 执行导入/复制到编辑器
+//! - `1/2/3` - 快速选择格式 (SQL/CSV/JSON)
+//! - `h/l` - 切换格式
+//! - `Ctrl+R` - 刷新预览
 
+use super::keyboard;
 use crate::ui::styles::{DANGER, GRAY, MUTED, SPACING_SM};
-use egui::{self, Color32, RichText, Rounding, ScrollArea, TextEdit, Vec2};
+use egui::{self, Color32, Key, RichText, Rounding, ScrollArea, TextEdit, Vec2};
 use std::path::PathBuf;
 
 /// 导入格式
@@ -86,8 +94,8 @@ pub struct CsvImportConfig {
     pub table_name: String,
     /// 文本引用字符
     pub quote_char: char,
-    /// 编码（预留功能）
-    #[allow(dead_code)]
+    /// 文件编码（预留功能，用于未来支持非 UTF-8 编码）
+    #[allow(dead_code)] // 预留字段，待实现多编码支持
     pub encoding: String,
 }
 
@@ -218,6 +226,77 @@ impl ImportDialog {
         }
 
         let mut action = ImportAction::None;
+        let has_file = state.file_path.is_some();
+        let has_preview = state.preview.is_some();
+        let can_import = has_file && has_preview && state.error.is_none();
+
+        // 处理键盘快捷键（仅当没有文本输入焦点时）
+        if !keyboard::has_text_focus(ctx) {
+            // Esc 关闭
+            if keyboard::handle_close_keys(ctx) {
+                *show = false;
+                return ImportAction::Close;
+            }
+
+            // Enter 执行导入
+            if can_import {
+                match keyboard::handle_dialog_keys(ctx) {
+                    keyboard::DialogAction::Confirm => {
+                        return match state.mode {
+                            ImportMode::Execute => ImportAction::Execute,
+                            ImportMode::CopyToEditor => {
+                                if let Some(ref preview) = state.preview {
+                                    let sql = preview.sql_statements.join("\n\n");
+                                    ImportAction::CopyToEditor(sql)
+                                } else {
+                                    ImportAction::None
+                                }
+                            }
+                        };
+                    }
+                    _ => {}
+                }
+            }
+
+            ctx.input(|i| {
+                // 数字键快速选择格式: 1=SQL, 2=CSV, 3=JSON
+                if i.key_pressed(Key::Num1) {
+                    state.format = ImportFormat::Sql;
+                    state.preview = None;
+                }
+                if i.key_pressed(Key::Num2) {
+                    state.format = ImportFormat::Csv;
+                    state.preview = None;
+                }
+                if i.key_pressed(Key::Num3) {
+                    state.format = ImportFormat::Json;
+                    state.preview = None;
+                }
+
+                // h/l 切换格式
+                if i.key_pressed(Key::H) || i.key_pressed(Key::ArrowLeft) {
+                    state.format = match state.format {
+                        ImportFormat::Sql => ImportFormat::Json,
+                        ImportFormat::Csv => ImportFormat::Sql,
+                        ImportFormat::Json => ImportFormat::Csv,
+                    };
+                    state.preview = None;
+                }
+                if i.key_pressed(Key::L) || i.key_pressed(Key::ArrowRight) {
+                    state.format = match state.format {
+                        ImportFormat::Sql => ImportFormat::Csv,
+                        ImportFormat::Csv => ImportFormat::Json,
+                        ImportFormat::Json => ImportFormat::Sql,
+                    };
+                    state.preview = None;
+                }
+
+                // Ctrl+R 刷新预览
+                if i.modifiers.ctrl && i.key_pressed(Key::R) && has_file {
+                    action = ImportAction::RefreshPreview;
+                }
+            });
+        }
 
         egui::Window::new("📥 导入数据")
             .collapsible(false)
@@ -361,19 +440,22 @@ impl ImportDialog {
         ui.horizontal(|ui| {
             // 格式选择
             ui.label(RichText::new("格式:").color(GRAY));
-            for fmt in [ImportFormat::Sql, ImportFormat::Csv, ImportFormat::Json] {
-                let is_selected = state.format == fmt;
-                let text = format!("{} {}", fmt.icon(), fmt.name());
+            for (idx, fmt) in [ImportFormat::Sql, ImportFormat::Csv, ImportFormat::Json].iter().enumerate() {
+                let is_selected = state.format == *fmt;
+                let text = format!("{} {} [{}]", fmt.icon(), fmt.name(), idx + 1);
                 if ui.selectable_label(is_selected, RichText::new(&text)).clicked() {
-                    state.format = fmt;
+                    state.format = *fmt;
                     state.preview = None;
                 }
             }
             
             ui.separator();
-            
-            // 模式选择（仅 SQL 格式显示）
-            if state.format == ImportFormat::Sql {
+            ui.label(RichText::new("h/l").small().color(GRAY));
+        });
+        
+        // 模式选择（仅 SQL 格式显示）
+        if state.format == ImportFormat::Sql {
+            ui.horizontal(|ui| {
                 ui.label(RichText::new("模式:").color(GRAY));
                 
                 if ui.selectable_label(
@@ -389,8 +471,8 @@ impl ImportDialog {
                 ).on_hover_text("将 SQL 复制到编辑器中").clicked() {
                     state.mode = ImportMode::CopyToEditor;
                 }
-            }
-        });
+            });
+        }
     }
 
     /// SQL 选项
@@ -632,13 +714,13 @@ impl ImportDialog {
             
             // 刷新预览按钮
             if has_file
-                && ui.button("🔄 刷新预览").clicked() {
+                && ui.button("🔄 刷新预览 [Ctrl+R]").clicked() {
                     action = ImportAction::RefreshPreview;
                 }
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // 取消按钮
-                if ui.button("取消").clicked() {
+                if ui.button("取消 [Esc]").clicked() {
                     *show = false;
                     action = ImportAction::Close;
                 }
@@ -648,8 +730,8 @@ impl ImportDialog {
                 
                 ui.add_enabled_ui(can_import, |ui| {
                     let btn_text = match state.mode {
-                        ImportMode::Execute => "🚀 执行导入",
-                        ImportMode::CopyToEditor => "📋 复制到编辑器",
+                        ImportMode::Execute => "🚀 执行导入 [Enter]",
+                        ImportMode::CopyToEditor => "📋 复制到编辑器 [Enter]",
                     };
                     
                     if ui.button(RichText::new(btn_text).strong()).clicked() {

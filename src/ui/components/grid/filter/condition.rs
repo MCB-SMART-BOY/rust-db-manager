@@ -38,6 +38,7 @@ impl Default for ColumnFilter {
     }
 }
 
+#[allow(dead_code)] // 公开 API，Builder 模式供外部使用
 impl ColumnFilter {
     /// 创建新的筛选条件
     pub fn new(column: String) -> Self {
@@ -47,43 +48,37 @@ impl ColumnFilter {
         }
     }
 
-    /// 设置操作符
-    #[allow(dead_code)]
+    /// 设置操作符（Builder 模式）
     pub fn with_operator(mut self, op: FilterOperator) -> Self {
         self.operator = op;
         self
     }
 
-    /// 设置值
-    #[allow(dead_code)]
+    /// 设置值（Builder 模式）
     pub fn with_value(mut self, value: String) -> Self {
         self.value = value;
         self
     }
 
-    /// 设置第二个值（用于 BETWEEN）
-    #[allow(dead_code)]
+    /// 设置第二个值（用于 BETWEEN，Builder 模式）
     pub fn with_value2(mut self, value2: String) -> Self {
         self.value2 = value2;
         self
     }
 
-    /// 设置大小写敏感
-    #[allow(dead_code)]
+    /// 设置大小写敏感（Builder 模式）
     pub fn with_case_sensitive(mut self, case_sensitive: bool) -> Self {
         self.case_sensitive = case_sensitive;
         self
     }
 
-    /// 设置逻辑关系
-    #[allow(dead_code)]
+    /// 设置逻辑关系（Builder 模式）
     pub fn with_logic(mut self, logic: FilterLogic) -> Self {
         self.logic = logic;
         self
     }
 
     /// 检查条件是否有效（可以应用）
-    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
         if self.column.is_empty() {
             return false;

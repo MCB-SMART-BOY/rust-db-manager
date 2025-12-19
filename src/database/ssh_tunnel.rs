@@ -45,8 +45,8 @@ pub enum SshAuthMethod {
     PrivateKey,
 }
 
-#[allow(dead_code)]
 impl SshAuthMethod {
+    /// 获取认证方式的显示名称
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Password => "密码",
@@ -54,6 +54,8 @@ impl SshAuthMethod {
         }
     }
     
+    /// 获取所有认证方式
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn all() -> Vec<Self> {
         vec![Self::Password, Self::PrivateKey]
     }
@@ -86,9 +88,9 @@ pub struct SshTunnelConfig {
     pub local_port: u16,
 }
 
+#[allow(dead_code)] // 公开 API，供外部使用
 impl SshTunnelConfig {
     /// 创建新的 SSH 隧道配置
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             ssh_port: 22,
@@ -173,8 +175,8 @@ pub struct SshTunnel {
     local_addr: SocketAddr,
     /// 是否正在运行
     running: Arc<RwLock<bool>>,
-    /// 隧道任务句柄
-    #[allow(dead_code)]
+    /// 隧道任务句柄（保持任务存活，防止被丢弃）
+    #[allow(dead_code)] // 字段用于保持任务生命周期，不需要直接访问
     task_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -356,7 +358,7 @@ impl SshTunnel {
     }
 
     /// 获取本地监听地址
-    #[allow(dead_code)]
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -367,7 +369,6 @@ impl SshTunnel {
     }
 
     /// 停止隧道
-    #[allow(dead_code)]
     pub async fn stop(&self) {
         let mut running = self.running.write().await;
         *running = false;
@@ -424,7 +425,6 @@ impl SshTunnelManager {
     }
 
     /// 停止指定隧道
-    #[allow(dead_code)]
     pub async fn stop(&self, name: &str) {
         let tunnel = {
             let mut tunnels = self.tunnels.write().await;
@@ -437,7 +437,7 @@ impl SshTunnelManager {
     }
 
     /// 停止所有隧道
-    #[allow(dead_code)]
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub async fn stop_all(&self) {
         let tunnels: Vec<_> = {
             let mut tunnels = self.tunnels.write().await;

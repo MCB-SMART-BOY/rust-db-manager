@@ -1,17 +1,19 @@
 //! DDL 操作对话框
 //!
 //! 提供创建表、修改表结构等 DDL 操作的 UI。
+//! 支持 Helix 风格的键盘导航。
 
+use super::keyboard::{self, DialogAction, ListNavigation};
 use crate::database::DatabaseType;
-use egui::{self, Color32, RichText, TextEdit};
+use egui::{self, Color32, Key, RichText, TextEdit};
 
 // ============================================================================
 // 列定义
 // ============================================================================
 
 /// 列数据类型（支持多种数据库的常用类型）
+#[allow(dead_code)] // 公开 API，完整的列类型定义
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum ColumnType {
     // 整数类型
     Integer,
@@ -355,23 +357,26 @@ impl TableDefinition {
 // ============================================================================
 
 /// DDL 对话框状态
+#[allow(dead_code)] // type_dropdown_open 预留用于类型选择 UI
 #[derive(Default)]
 pub struct DdlDialogState {
     /// 当前正在编辑的表定义
     pub table: TableDefinition,
     /// 是否显示对话框
     pub show: bool,
-    /// 类型选择下拉框打开状态（预留供将来使用）
-    #[allow(dead_code)]
+    /// 类型选择下拉框打开状态
     pub type_dropdown_open: Option<usize>,
     /// 错误信息
     pub error: Option<String>,
     /// 生成的 SQL
     pub generated_sql: String,
+    /// 当前选中的列索引（用于键盘导航）
+    pub selected_column: usize,
 }
 
+#[allow(dead_code)] // 公开 API，供外部使用
 impl DdlDialogState {
-    #[allow(dead_code)]
+    /// 创建新的 DDL 对话框状态
     pub fn new() -> Self {
         Self::default()
     }
@@ -391,6 +396,7 @@ impl DdlDialogState {
         self.show = true;
         self.error = None;
         self.generated_sql.clear();
+        self.selected_column = 0;
     }
 
     /// 关闭对话框
@@ -421,6 +427,89 @@ impl DdlDialog {
 
         let mut result: Option<String> = None;
         let mut should_close = false;
+
+        // 键盘快捷键处理（仅在没有文本框焦点时）
+        if !keyboard::has_text_focus(ctx) {
+            // Esc/q 关闭
+            if keyboard::handle_close_keys(ctx) {
+                state.close();
+                return None;
+            }
+
+            // Enter 创建表
+            if let DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
+                match state.table.validate() {
+                    Ok(()) => {
+                        result = Some(state.table.to_create_sql());
+                        state.close();
+                        return result;
+                    }
+                    Err(e) => {
+                        state.error = Some(e);
+                    }
+                }
+            }
+
+            // 列导航
+            let col_count = state.table.columns.len();
+            match keyboard::handle_list_navigation(ctx) {
+                ListNavigation::Up => {
+                    if state.selected_column > 0 {
+                        state.selected_column -= 1;
+                    }
+                }
+                ListNavigation::Down => {
+                    if state.selected_column < col_count.saturating_sub(1) {
+                        state.selected_column += 1;
+                    }
+                }
+                ListNavigation::Start => {
+                    state.selected_column = 0;
+                }
+                ListNavigation::End => {
+                    state.selected_column = col_count.saturating_sub(1);
+                }
+                ListNavigation::Delete => {
+                    // dd 删除当前列
+                    if col_count > 1 {
+                        state.table.columns.remove(state.selected_column);
+                        if state.selected_column >= state.table.columns.len() {
+                            state.selected_column = state.table.columns.len().saturating_sub(1);
+                        }
+                    }
+                }
+                ListNavigation::AddBelow => {
+                    // o 在下方添加列
+                    let insert_pos = (state.selected_column + 1).min(col_count);
+                    state.table.columns.insert(insert_pos, ColumnDefinition::default());
+                    state.selected_column = insert_pos;
+                }
+                ListNavigation::AddAbove => {
+                    // O 在上方添加列
+                    state.table.columns.insert(state.selected_column, ColumnDefinition::default());
+                }
+                _ => {}
+            }
+
+            // 空格切换主键
+            ctx.input(|i| {
+                if i.key_pressed(Key::Space) && i.modifiers.is_none() {
+                    if let Some(col) = state.table.columns.get_mut(state.selected_column) {
+                        let new_pk = !col.primary_key;
+                        col.primary_key = new_pk;
+                        if new_pk {
+                            col.nullable = false;
+                            // 取消其他列的主键
+                            for (idx, other_col) in state.table.columns.iter_mut().enumerate() {
+                                if idx != state.selected_column {
+                                    other_col.primary_key = false;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         egui::Window::new("创建表")
             .collapsible(false)
@@ -455,9 +544,14 @@ impl DdlDialog {
                     // 列定义区域
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("列定义").strong());
+                        ui.label(
+                            RichText::new("[j/k 移动 | o/O 添加 | dd 删除 | Space 切换主键]")
+                                .small()
+                                .color(Color32::from_rgb(120, 120, 120)),
+                        );
                         
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("+ 添加列").clicked() {
+                            if ui.button("+ 添加列 [o]").clicked() {
                                 state.table.columns.push(ColumnDefinition::default());
                             }
                         });
@@ -493,8 +587,17 @@ impl DdlDialog {
                         .max_height(200.0)
                         .show(ui, |ui| {
                             for idx in 0..col_count {
+                                let is_selected = idx == state.selected_column;
                                 let col = &mut state.table.columns[idx];
-                                ui.horizontal(|ui| {
+                                
+                                // 选中行高亮背景
+                                let row_response = ui.horizontal(|ui| {
+                                    // 选中指示器
+                                    if is_selected {
+                                        ui.label(RichText::new("▶").color(Color32::from_rgb(100, 180, 255)));
+                                    } else {
+                                        ui.label(RichText::new(" ").monospace());
+                                    }
                                     // 列名
                                     ui.add(
                                         TextEdit::singleline(&mut col.name)
@@ -553,12 +656,17 @@ impl DdlDialog {
                                     // 删除按钮
                                     if col_count > 1
                                         && ui.small_button("×")
-                                            .on_hover_text("删除列")
+                                            .on_hover_text("删除列 [dd]")
                                             .clicked()
                                         {
                                             col_to_remove = Some(idx);
                                         }
                                 });
+
+                                // 点击行选中
+                                if row_response.response.clicked() {
+                                    state.selected_column = idx;
+                                }
                             }
                         });
 
@@ -597,9 +705,20 @@ impl DdlDialog {
 
                     ui.add_space(8.0);
 
+                    // 快捷键提示
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("快捷键: Esc/q 关闭 | Enter 创建")
+                                .small()
+                                .color(Color32::from_rgb(120, 120, 120)),
+                        );
+                    });
+
+                    ui.add_space(4.0);
+
                     // 按钮
                     ui.horizontal(|ui| {
-                        if ui.button("创建表").clicked() {
+                        if ui.button("创建表 [Enter]").clicked() {
                             match state.table.validate() {
                                 Ok(()) => {
                                     result = Some(state.table.to_create_sql());
@@ -611,7 +730,7 @@ impl DdlDialog {
                             }
                         }
 
-                        if ui.button("取消").clicked() {
+                        if ui.button("取消 [Esc]").clicked() {
                             should_close = true;
                         }
                     });

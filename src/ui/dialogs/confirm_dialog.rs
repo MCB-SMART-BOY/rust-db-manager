@@ -1,6 +1,11 @@
 //! 确认对话框组件
+//!
+//! 支持的快捷键：
+//! - `Enter` / `y` - 确认操作
+//! - `Esc` / `n` - 取消操作
 
-use crate::ui::styles::{DANGER, SPACING_MD, SPACING_LG};
+use super::keyboard;
+use crate::ui::styles::{DANGER, GRAY, SPACING_MD, SPACING_LG};
 use egui::{self, Color32, RichText, Rounding};
 
 pub struct ConfirmDialog;
@@ -16,6 +21,20 @@ impl ConfirmDialog {
     ) {
         if !*show {
             return;
+        }
+
+        // 处理键盘快捷键
+        match keyboard::handle_confirm_keys(ctx) {
+            keyboard::DialogAction::Confirm => {
+                *on_confirm = true;
+                *show = false;
+                return;
+            }
+            keyboard::DialogAction::Cancel => {
+                *show = false;
+                return;
+            }
+            keyboard::DialogAction::None => {}
         }
 
         egui::Window::new(title)
@@ -50,12 +69,20 @@ impl ConfirmDialog {
 
                 ui.add_space(SPACING_LG);
 
+                // 快捷键提示
+                ui.horizontal(|ui| {
+                    ui.add_space(SPACING_MD);
+                    ui.label(RichText::new("按 y 确认，n 取消").small().color(GRAY));
+                });
+
+                ui.add_space(SPACING_MD);
+
                 // 按钮区域
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // 确认按钮（危险样式）
                         let confirm_btn = egui::Button::new(
-                            RichText::new(format!("{} [Enter]", confirm_text))
+                            RichText::new(format!("{} [y]", confirm_text))
                                 .color(Color32::WHITE)
                         )
                         .fill(DANGER)
@@ -69,7 +96,7 @@ impl ConfirmDialog {
                         ui.add_space(SPACING_MD);
 
                         // 取消按钮
-                        let cancel_btn = egui::Button::new("取消 [Esc]")
+                        let cancel_btn = egui::Button::new("取消 [n]")
                             .rounding(Rounding::same(6.0));
 
                         if ui.add(cancel_btn).clicked() {

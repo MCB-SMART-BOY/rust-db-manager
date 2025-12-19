@@ -73,7 +73,6 @@ pub async fn get_tables_for_database(
 /// 获取表的主键列名
 /// 
 /// 从数据库元数据中查询主键信息，返回主键列名（如果存在）
-#[allow(dead_code)] // 预留函数供将来使用
 pub async fn get_primary_key_column(
     config: &ConnectionConfig,
     table: &str,
@@ -248,7 +247,6 @@ fn connect_sqlite(config: &ConnectionConfig) -> Result<Vec<String>, DbError> {
 }
 
 /// 获取 SQLite 表的主键列名
-#[allow(dead_code)]
 fn get_sqlite_primary_key(config: &ConnectionConfig, table: &str) -> Result<Option<String>, DbError> {
     let conn = SqliteConn::open(&config.database)
         .map_err(|e| DbError::Connection(format!("SQLite 连接失败: {}", e)))?;
@@ -359,7 +357,6 @@ async fn get_postgres_tables(config: &ConnectionConfig, database: &str) -> Resul
 }
 
 /// 获取 PostgreSQL 表的主键列名
-#[allow(dead_code)]
 async fn get_postgres_primary_key(config: &ConnectionConfig, table: &str) -> Result<Option<String>, DbError> {
     let client = POOL_MANAGER.get_pg_client(config).await?;
     
@@ -492,7 +489,6 @@ async fn get_mysql_tables(config: &ConnectionConfig, database: &str) -> Result<V
 }
 
 /// 获取 MySQL 表的主键列名
-#[allow(dead_code)]
 async fn get_mysql_primary_key(config: &ConnectionConfig, table: &str) -> Result<Option<String>, DbError> {
     let pool = POOL_MANAGER.get_mysql_pool(config).await?;
     

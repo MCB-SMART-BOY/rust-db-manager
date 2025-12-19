@@ -34,10 +34,13 @@ pub struct SqlEditorActions {
     pub clear: bool,
     /// 请求焦点转移到数据表格（Escape 键或向上移动时）
     pub focus_to_grid: bool,
+    /// 编辑器被点击，请求获取焦点
+    pub request_focus: bool,
 }
 
 impl SqlEditor {
     /// 显示 SQL 编辑器（左侧输入，右侧历史）
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         ui: &mut egui::Ui,
         sql_input: &mut String,
@@ -51,6 +54,7 @@ impl SqlEditor {
         show_autocomplete: &mut bool,
         selected_completion: &mut usize,
         request_focus: &mut bool,
+        is_focused: bool,
     ) -> SqlEditorActions {
         let mut actions = SqlEditorActions::default();
 
@@ -160,8 +164,13 @@ impl SqlEditor {
                                         *request_focus = false;
                                     }
 
-                                    // 处理快捷键
-                                    if response.has_focus() {
+                                    // 点击编辑器时请求焦点
+                                    if response.clicked() || response.has_focus() {
+                                        actions.request_focus = true;
+                                    }
+
+                                    // 处理快捷键（只有当全局焦点在编辑器时才响应）
+                                    if response.has_focus() && is_focused {
                                         Self::handle_shortcuts(
                                             ui,
                                             sql_input,
@@ -173,7 +182,8 @@ impl SqlEditor {
                                             selected_completion,
                                             highlight_colors,
                                         );
-                                    } else {
+                                    } else if !is_focused {
+                                        // 全局焦点不在编辑器时，关闭自动补全
                                         *show_autocomplete = false;
                                     }
 

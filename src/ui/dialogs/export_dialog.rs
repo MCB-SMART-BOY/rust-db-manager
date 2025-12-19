@@ -1,9 +1,19 @@
 //! 数据导出对话框 - 支持多种格式和自定义选项
+//!
+//! 支持的快捷键：
+//! - `Esc` - 关闭对话框
+//! - `Enter` - 导出（当配置有效时）
+//! - `1/2/3` - 快速选择格式 (CSV/SQL/JSON)
+//! - `h/l` - 切换格式
+//! - `j/k` - 在列选择中导航
+//! - `Space` - 切换当前列的选中状态
+//! - `a` - 全选/取消全选列
 
+use super::keyboard;
 use crate::core::ExportFormat;
 use crate::database::QueryResult;
 use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD};
-use egui::{self, Color32, RichText, Rounding, ScrollArea, TextEdit};
+use egui::{self, Color32, Key, RichText, Rounding, ScrollArea, TextEdit};
 
 /// 导出配置
 #[derive(Clone)]
@@ -28,6 +38,9 @@ pub struct ExportConfig {
     pub sql_batch_size: usize,
     /// JSON: 是否美化输出
     pub json_pretty: bool,
+    /// 键盘导航: 当前选中的列索引
+    #[doc(hidden)]
+    pub nav_column_index: usize,
 }
 
 impl Default for ExportConfig {
@@ -43,6 +56,7 @@ impl Default for ExportConfig {
             sql_use_transaction: true,
             sql_batch_size: 100,
             json_pretty: true,
+            nav_column_index: 0,
         }
     }
 }
@@ -99,6 +113,87 @@ impl ExportDialog {
 
         let row_count = data.map(|d| d.rows.len()).unwrap_or(0);
         let col_count = data.map(|d| d.columns.len()).unwrap_or(0);
+        let can_export = config.selected_column_count() > 0 && row_count > 0;
+
+        // 处理键盘快捷键（仅当没有文本输入焦点时）
+        if !keyboard::has_text_focus(ctx) {
+            // Esc 关闭
+            if keyboard::handle_close_keys(ctx) {
+                *show = false;
+                return;
+            }
+
+            // Enter 导出
+            if can_export {
+                match keyboard::handle_dialog_keys(ctx) {
+                    keyboard::DialogAction::Confirm => {
+                        *on_export = Some(config.clone());
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+
+            ctx.input(|i| {
+                // 数字键快速选择格式: 1=CSV, 2=SQL, 3=JSON
+                if i.key_pressed(Key::Num1) {
+                    config.format = ExportFormat::Csv;
+                }
+                if i.key_pressed(Key::Num2) {
+                    config.format = ExportFormat::Sql;
+                }
+                if i.key_pressed(Key::Num3) {
+                    config.format = ExportFormat::Json;
+                }
+
+                // h/l 切换格式
+                if i.key_pressed(Key::H) || i.key_pressed(Key::ArrowLeft) {
+                    config.format = match config.format {
+                        ExportFormat::Csv => ExportFormat::Json,
+                        ExportFormat::Sql => ExportFormat::Csv,
+                        ExportFormat::Json => ExportFormat::Sql,
+                    };
+                }
+                if i.key_pressed(Key::L) || i.key_pressed(Key::ArrowRight) {
+                    config.format = match config.format {
+                        ExportFormat::Csv => ExportFormat::Sql,
+                        ExportFormat::Sql => ExportFormat::Json,
+                        ExportFormat::Json => ExportFormat::Csv,
+                    };
+                }
+
+                // j/k 列选择导航
+                if col_count > 0 {
+                    if i.key_pressed(Key::J) || i.key_pressed(Key::ArrowDown) {
+                        config.nav_column_index = (config.nav_column_index + 1).min(col_count - 1);
+                    }
+                    if i.key_pressed(Key::K) || i.key_pressed(Key::ArrowUp) {
+                        config.nav_column_index = config.nav_column_index.saturating_sub(1);
+                    }
+                    if i.key_pressed(Key::G) && !i.modifiers.shift {
+                        config.nav_column_index = 0;
+                    }
+                    if i.key_pressed(Key::G) && i.modifiers.shift {
+                        config.nav_column_index = col_count.saturating_sub(1);
+                    }
+
+                    // Space 切换当前列
+                    if i.key_pressed(Key::Space) {
+                        if let Some(selected) = config.selected_columns.get_mut(config.nav_column_index) {
+                            *selected = !*selected;
+                        }
+                    }
+
+                    // a 全选/取消全选
+                    if i.key_pressed(Key::A) {
+                        let all_selected = config.all_columns_selected();
+                        for s in &mut config.selected_columns {
+                            *s = !all_selected;
+                        }
+                    }
+                }
+            });
+        }
 
         egui::Window::new("📤 导出数据")
             .collapsible(false)
@@ -205,18 +300,21 @@ impl ExportDialog {
         ui.horizontal(|ui| {
             ui.label(RichText::new("格式:").color(GRAY));
             
-            for (fmt, icon, name) in [
+            for (idx, (fmt, icon, name)) in [
                 (ExportFormat::Csv, "📊", "CSV"),
                 (ExportFormat::Sql, "📝", "SQL"),
                 (ExportFormat::Json, "🔧", "JSON"),
-            ] {
-                let is_selected = config.format == fmt;
-                let text = format!("{} {}", icon, name);
+            ].iter().enumerate() {
+                let is_selected = config.format == *fmt;
+                let text = format!("{} {} [{}]", icon, name, idx + 1);
                 
                 if ui.selectable_label(is_selected, RichText::new(&text).strong()).clicked() {
-                    config.format = fmt;
+                    config.format = *fmt;
                 }
             }
+            
+            ui.separator();
+            ui.label(RichText::new("h/l 切换").small().color(GRAY));
         });
     }
 
@@ -260,46 +358,71 @@ impl ExportDialog {
     /// 列选择器（折叠面板）
     fn show_column_selector(ui: &mut egui::Ui, config: &mut ExportConfig, columns: &[String]) {
         let header = format!(
-            "选择列 ({}/{})",
+            "选择列 ({}/{}) [j/k Space a]",
             config.selected_column_count(),
             columns.len()
         );
         
         egui::CollapsingHeader::new(header)
-            .default_open(false)
+            .default_open(true)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let all_selected = config.all_columns_selected();
-                    if ui.button(if all_selected { "取消全选" } else { "全选" }).clicked() {
+                    if ui.button(if all_selected { "取消全选 [a]" } else { "全选 [a]" }).clicked() {
                         let new_state = !all_selected;
                         for s in &mut config.selected_columns {
                             *s = new_state;
                         }
                     }
+                    
+                    ui.separator();
+                    ui.label(RichText::new("j/k 导航, Space 切换").small().color(GRAY));
                 });
                 
                 ui.add_space(4.0);
                 
-                // 列复选框（水平换行）
+                // 列复选框（垂直列表，支持键盘导航高亮）
                 egui::Frame::none()
                     .fill(Color32::from_rgba_unmultiplied(60, 60, 70, 30))
                     .rounding(Rounding::same(4.0))
                     .inner_margin(egui::Margin::symmetric(8.0, 6.0))
                     .show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            for (i, col_name) in columns.iter().enumerate() {
-                                if i < config.selected_columns.len() {
-                                    let display_name = if col_name.len() > 12 {
-                                        format!("{}…", &col_name[..10])
-                                    } else {
-                                        col_name.clone()
-                                    };
-                                    
-                                    ui.checkbox(&mut config.selected_columns[i], &display_name)
-                                        .on_hover_text(col_name);
+                        ScrollArea::vertical()
+                            .max_height(120.0)
+                            .show(ui, |ui| {
+                                for (i, col_name) in columns.iter().enumerate() {
+                                    if i < config.selected_columns.len() {
+                                        let is_nav_selected = i == config.nav_column_index;
+                                        let display_name = if col_name.len() > 20 {
+                                            format!("{}…", &col_name[..18])
+                                        } else {
+                                            col_name.clone()
+                                        };
+                                        
+                                        // 键盘导航高亮
+                                        let bg_color = if is_nav_selected {
+                                            Color32::from_rgba_unmultiplied(100, 150, 255, 60)
+                                        } else {
+                                            Color32::TRANSPARENT
+                                        };
+                                        
+                                        egui::Frame::none()
+                                            .fill(bg_color)
+                                            .rounding(Rounding::same(2.0))
+                                            .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                                            .show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    if is_nav_selected {
+                                                        ui.label(RichText::new("▶").small().color(Color32::from_rgb(100, 180, 255)));
+                                                    }
+                                                    if ui.checkbox(&mut config.selected_columns[i], &display_name).clicked() {
+                                                        config.nav_column_index = i;
+                                                    }
+                                                });
+                                            });
+                                    }
                                 }
-                            }
-                        });
+                            });
                     });
             });
     }
@@ -496,12 +619,12 @@ impl ExportDialog {
         let can_export = config.selected_column_count() > 0 && row_count > 0;
 
         ui.horizontal(|ui| {
-            if ui.button("取消").clicked() {
+            if ui.button("取消 [Esc]").clicked() {
                 *show = false;
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let btn_text = format!("导出 {}", config.format.display_name());
+                let btn_text = format!("导出 {} [Enter]", config.format.display_name());
                 let export_btn = egui::Button::new(
                     RichText::new(&btn_text)
                         .color(if can_export { Color32::WHITE } else { GRAY })

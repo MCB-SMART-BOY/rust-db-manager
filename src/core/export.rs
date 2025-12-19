@@ -40,15 +40,15 @@ impl ExportFormat {
 // 导入格式
 // ============================================================================
 
-/// 导入格式（预留供导入对话框使用）
+/// 导入格式（供导入对话框使用）
+#[allow(dead_code)] // 公开 API，供外部使用
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)]
 pub enum ImportFormat {
     Csv,
     Json,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // 公开 API，供外部使用
 impl ImportFormat {
     pub fn extension(&self) -> &str {
         match self {
@@ -126,9 +126,8 @@ pub struct JsonImportConfig {
 // 导入结果
 // ============================================================================
 
-/// 导入预览结果（预留供导入对话框使用）
+/// 导入预览结果（供导入对话框使用）
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ImportPreview {
     /// 列名
     pub columns: Vec<String>,
@@ -140,9 +139,9 @@ pub struct ImportPreview {
     pub warnings: Vec<String>,
 }
 
-/// 导入结果（预留供导入对话框使用）
+/// 导入结果（供导入对话框使用）
+#[allow(dead_code)] // 公开 API，供外部使用
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ImportResult {
     /// 生成的 SQL 语句
     pub sql_statements: Vec<String>,
@@ -155,10 +154,11 @@ pub struct ImportResult {
 }
 
 // ============================================================================
-// 导出函数（保留供外部调用，内部使用 app.rs 中的增强版本）
+// 导出函数（简化版本，供测试和基本导出使用）
 // ============================================================================
 
-#[allow(dead_code)]
+/// 导出查询结果到 CSV 文件
+#[allow(dead_code)] // 公开 API，供外部使用
 pub fn export_to_csv(result: &QueryResult, path: &Path) -> Result<(), String> {
     let mut file = File::create(path).map_err(|e| e.to_string())?;
 
@@ -184,7 +184,8 @@ pub fn export_to_csv(result: &QueryResult, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
+/// 导出查询结果到 SQL INSERT 语句文件
+#[allow(dead_code)] // 公开 API，供外部使用
 pub fn export_to_sql(result: &QueryResult, table_name: &str, path: &Path) -> Result<(), String> {
     let mut file = File::create(path).map_err(|e| e.to_string())?;
 
@@ -230,7 +231,8 @@ pub fn export_to_sql(result: &QueryResult, table_name: &str, path: &Path) -> Res
     Ok(())
 }
 
-#[allow(dead_code)]
+/// 导出查询结果到 JSON 文件
+#[allow(dead_code)] // 公开 API，供外部使用
 pub fn export_to_json(result: &QueryResult, path: &Path) -> Result<(), String> {
     let mut file = File::create(path).map_err(|e| e.to_string())?;
 
@@ -716,7 +718,8 @@ fn sql_value_from_string(s: &str) -> String {
 // 工具函数
 // ============================================================================
 
-#[allow(dead_code)]
+/// 转义 CSV 字段中的特殊字符
+#[allow(dead_code)] // 被 export_to_csv 使用
 fn escape_csv_field(field: &str) -> String {
     if field.contains(',') || field.contains('"') || field.contains('\n') {
         format!("\"{}\"", field.replace('"', "\"\""))
@@ -730,8 +733,8 @@ fn escape_sql_identifier(name: &str) -> String {
     name.replace('`', "``").replace('"', "\"\"")
 }
 
-/// 简单读取 SQL 文件内容（保留用于测试或简单场景）
-#[allow(dead_code)]
+/// 读取 SQL 文件内容
+#[allow(dead_code)] // 公开 API，供外部使用
 pub fn import_sql_file(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| e.to_string())
 }

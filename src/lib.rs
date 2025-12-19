@@ -16,10 +16,57 @@
 //!
 //! ## 模块结构
 //!
-//! - `core`: 核心功能（配置、主题、导出、语法高亮等）
-//! - `database`: 数据库连接和查询
-//! - `ui`: 用户界面组件
+//! - [`core`]: 核心功能（配置、主题、导出、语法高亮等）
+//! - [`database`]: 数据库连接和查询
+//! - [`ui`]: 用户界面组件
+//! - [`prelude`]: 常用类型预导入
 
+// ============================================================================
+// 内部模块
+// ============================================================================
+
+pub mod app;
 pub mod core;
 pub mod database;
+pub mod prelude;
 pub mod ui;
+
+// ============================================================================
+// 公开 API 重导出
+// ============================================================================
+
+/// 核心功能模块的便捷访问
+pub use core::{
+    // 配置
+    AppConfig,
+    // 主题
+    ThemeManager, ThemePreset,
+    // SQL 处理
+    format_sql, highlight_sql,
+    // 自动补全
+    AutoComplete, CompletionKind,
+    // 历史记录
+    QueryHistory,
+    // 导出功能
+    ExportFormat,
+};
+
+/// 数据库模块的便捷访问
+pub use database::{
+    // 类型定义
+    DatabaseType, ConnectionConfig, QueryResult,
+    // 连接管理
+    ConnectionManager, Connection,
+    // SSH 支持
+    SshAuthMethod, SshTunnelConfig,
+    // 异步操作
+    connect_database, execute_query, get_tables_for_database,
+};
+
+/// UI 组件的便捷访问
+pub use ui::{
+    // 数据表格
+    DataGrid, DataGridState,
+    // 焦点管理
+    FocusArea, SidebarSection,
+};

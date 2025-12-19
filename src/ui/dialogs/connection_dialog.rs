@@ -1,8 +1,9 @@
 //! 数据库连接对话框
 
+use super::keyboard::{self, DialogAction};
 use crate::database::{ConnectionConfig, DatabaseType, MySqlSslMode, SshAuthMethod};
 use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD, SPACING_LG};
-use egui::{self, Color32, RichText, Rounding, TextEdit};
+use egui::{self, Color32, Key, Modifiers, RichText, Rounding, TextEdit};
 use std::path::Path;
 
 /// 输入验证结果
@@ -96,6 +97,80 @@ impl ConnectionDialog {
         let mut is_open = *open;
         let mut should_close = false;
 
+        // 键盘快捷键处理（仅在没有文本框焦点时）
+        if !keyboard::has_text_focus(ctx) {
+            // Esc/q 关闭
+            if keyboard::handle_close_keys(ctx) {
+                *open = false;
+                return;
+            }
+
+            // Enter 保存（如果验证通过）
+            let validation = validate_config(config);
+            if validation.is_valid {
+                if let DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
+                    *on_save = true;
+                    *open = false;
+                    return;
+                }
+            }
+
+            // 数据库类型快捷键
+            let db_types = DatabaseType::all();
+            ctx.input(|i| {
+                // 数字键 1/2/3 选择数据库类型
+                for (idx, key) in [Key::Num1, Key::Num2, Key::Num3].iter().enumerate() {
+                    if i.key_pressed(*key) && i.modifiers.is_none() {
+                        if let Some(db_type) = db_types.get(idx) {
+                            config.db_type = db_type.clone();
+                            config.port = db_type.default_port();
+                            if config.host.is_empty() && !matches!(db_type, DatabaseType::SQLite) {
+                                config.host = "localhost".to_string();
+                            }
+                        }
+                    }
+                }
+
+                // h/l 切换数据库类型
+                if i.key_pressed(Key::H) && i.modifiers.is_none() {
+                    let current_idx = db_types.iter().position(|t| *t == config.db_type).unwrap_or(0);
+                    if current_idx > 0 {
+                        let new_type = &db_types[current_idx - 1];
+                        config.db_type = new_type.clone();
+                        config.port = new_type.default_port();
+                        if config.host.is_empty() && !matches!(new_type, DatabaseType::SQLite) {
+                            config.host = "localhost".to_string();
+                        }
+                    }
+                }
+                if i.key_pressed(Key::L) && i.modifiers.is_none() {
+                    let current_idx = db_types.iter().position(|t| *t == config.db_type).unwrap_or(0);
+                    if current_idx < db_types.len() - 1 {
+                        let new_type = &db_types[current_idx + 1];
+                        config.db_type = new_type.clone();
+                        config.port = new_type.default_port();
+                        if config.host.is_empty() && !matches!(new_type, DatabaseType::SQLite) {
+                            config.host = "localhost".to_string();
+                        }
+                    }
+                }
+
+                // Ctrl+O 打开文件（仅 SQLite）
+                if matches!(config.db_type, DatabaseType::SQLite)
+                    && i.key_pressed(Key::O)
+                    && i.modifiers == Modifiers::CTRL
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("SQLite 数据库", &["db", "sqlite", "sqlite3"])
+                        .add_filter("所有文件", &["*"])
+                        .pick_file()
+                    {
+                        config.database = path.display().to_string();
+                    }
+                }
+            });
+        }
+
         egui::Window::new("🔗 新建数据库连接")
             .open(&mut is_open)
             .resizable(false)
@@ -147,16 +222,24 @@ impl ConnectionDialog {
 
     /// 数据库类型选择器
     fn show_db_type_selector(ui: &mut egui::Ui, config: &mut ConnectionConfig) {
+        // 快捷键提示
+        ui.horizontal(|ui| {
+            ui.add_space(SPACING_SM);
+            ui.label(RichText::new("数据库类型 [1/2/3 或 h/l 切换]").small().color(MUTED));
+        });
+        ui.add_space(4.0);
+
         ui.horizontal(|ui| {
             ui.add_space(SPACING_SM);
             
-            for db_type in DatabaseType::all() {
+            for (idx, db_type) in DatabaseType::all().iter().enumerate() {
                 let is_selected = config.db_type == *db_type;
-                let (icon, name, color) = match db_type {
-                    DatabaseType::SQLite => ("🗃️", "SQLite", Color32::from_rgb(80, 160, 220)),
-                    DatabaseType::PostgreSQL => ("🐘", "PostgreSQL", Color32::from_rgb(80, 130, 180)),
-                    DatabaseType::MySQL => ("🐬", "MySQL", Color32::from_rgb(240, 150, 80)),
+                let (icon, name, color, key) = match db_type {
+                    DatabaseType::SQLite => ("🗃️", "SQLite", Color32::from_rgb(80, 160, 220), "1"),
+                    DatabaseType::PostgreSQL => ("🐘", "PostgreSQL", Color32::from_rgb(80, 130, 180), "2"),
+                    DatabaseType::MySQL => ("🐬", "MySQL", Color32::from_rgb(240, 150, 80), "3"),
                 };
+                let _ = idx; // 用于后续扩展
 
                 let fill = if is_selected {
                     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40)
@@ -180,7 +263,7 @@ impl ConnectionDialog {
                             ui.label(RichText::new(icon).size(18.0));
                             ui.add_space(4.0);
                             let text_color = if is_selected { color } else { GRAY };
-                            ui.label(RichText::new(name).strong().color(text_color));
+                            ui.label(RichText::new(format!("[{}] {}", key, name)).strong().color(text_color));
                         });
                     })
                     .response
@@ -277,7 +360,7 @@ impl ConnectionDialog {
                                 );
 
                                 if ui.add(
-                                    egui::Button::new("浏览")
+                                    egui::Button::new("浏览 [Ctrl+O]")
                                         .rounding(Rounding::same(4.0))
                                 ).clicked() {
                                     if let Some(path) = rfd::FileDialog::new()
@@ -443,12 +526,12 @@ impl ConnectionDialog {
                                     ui.selectable_value(
                                         &mut config.ssh_config.auth_method,
                                         SshAuthMethod::Password,
-                                        "密码",
+                                        SshAuthMethod::Password.display_name(),
                                     );
                                     ui.selectable_value(
                                         &mut config.ssh_config.auth_method,
                                         SshAuthMethod::PrivateKey,
-                                        "私钥",
+                                        SshAuthMethod::PrivateKey.display_name(),
                                     );
                                 });
                                 ui.end_row();
@@ -559,6 +642,13 @@ impl ConnectionDialog {
     ) {
         // 执行验证
         let validation = validate_config(config);
+
+        // 快捷键提示
+        ui.horizontal(|ui| {
+            ui.add_space(SPACING_SM);
+            ui.label(RichText::new("快捷键: Esc/q 关闭 | Enter 保存").small().color(MUTED));
+        });
+        ui.add_space(SPACING_SM);
 
         ui.horizontal(|ui| {
             // 取消按钮

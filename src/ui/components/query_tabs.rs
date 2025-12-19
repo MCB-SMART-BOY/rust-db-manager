@@ -12,10 +12,10 @@ use uuid::Uuid;
 // ============================================================================
 
 /// 单个查询 Tab 的状态
+#[allow(dead_code)] // id 预留用于持久化和 Tab 标识
 #[derive(Clone)]
 pub struct QueryTab {
-    /// 唯一标识符（预留供将来使用）
-    #[allow(dead_code)]
+    /// Tab 的唯一标识符
     pub id: String,
     /// Tab 标题
     pub title: String,
@@ -51,8 +51,8 @@ impl QueryTab {
         }
     }
 
-    /// 从 SQL 创建 Tab
-    #[allow(dead_code)]
+    /// 从 SQL 内容创建 Tab
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn from_sql(sql: &str) -> Self {
         let mut tab = Self::new();
         tab.sql = sql.to_string();
@@ -61,8 +61,7 @@ impl QueryTab {
         tab
     }
 
-    /// 从表名创建 Tab
-    #[allow(dead_code)]
+    /// 从表名和 SQL 创建 Tab
     pub fn from_table(table_name: &str, sql: &str) -> Self {
         let mut tab = Self::new();
         tab.sql = sql.to_string();
@@ -112,6 +111,12 @@ impl QueryTab {
         if self.table_name.is_none() {
             self.title = Self::extract_title(&self.sql);
         }
+    }
+
+    /// 获取标题
+    #[allow(dead_code)] // 公开 API，供外部使用
+    pub fn title(&self) -> &str {
+        &self.title
     }
 }
 
@@ -172,8 +177,8 @@ impl QueryTabManager {
         self.active_index
     }
 
-    /// 从 SQL 创建新 Tab
-    #[allow(dead_code)]
+    /// 创建带有 SQL 内容的新 Tab
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn new_tab_with_sql(&mut self, sql: &str) -> usize {
         if self.tabs.len() >= self.max_tabs {
             // 如果达到最大数量，使用当前 Tab
@@ -190,8 +195,8 @@ impl QueryTabManager {
         self.active_index
     }
 
-    /// 从表名创建新 Tab
-    #[allow(dead_code)]
+    /// 为表创建新 Tab（如果已存在则激活）
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn new_tab_for_table(&mut self, table_name: &str, sql: &str) -> usize {
         // 检查是否已有该表的 Tab
         if let Some(idx) = self.tabs.iter().position(|t| t.table_name.as_deref() == Some(table_name)) {
@@ -233,8 +238,7 @@ impl QueryTabManager {
         }
     }
 
-    /// 关闭当前 Tab
-    #[allow(dead_code)]
+    /// 关闭当前活动的 Tab
     pub fn close_active_tab(&mut self) {
         self.close_tab(self.active_index);
     }
@@ -271,16 +275,14 @@ impl QueryTabManager {
         }
     }
 
-    /// 移动到下一个 Tab
-    #[allow(dead_code)]
+    /// 切换到下一个 Tab
     pub fn next_tab(&mut self) {
         if !self.tabs.is_empty() {
             self.active_index = (self.active_index + 1) % self.tabs.len();
         }
     }
 
-    /// 移动到上一个 Tab
-    #[allow(dead_code)]
+    /// 切换到上一个 Tab
     pub fn prev_tab(&mut self) {
         if !self.tabs.is_empty() {
             self.active_index = if self.active_index == 0 {
@@ -292,9 +294,27 @@ impl QueryTabManager {
     }
 
     /// 检查是否有未保存的修改
-    #[allow(dead_code)]
+    #[allow(dead_code)] // 公开 API，供外部使用
     pub fn has_unsaved_changes(&self) -> bool {
         self.tabs.iter().any(|t| t.modified)
+    }
+
+    /// 获取 Tab 数量
+    #[allow(dead_code)] // 公开 API，供外部使用
+    pub fn len(&self) -> usize {
+        self.tabs.len()
+    }
+
+    /// 检查是否为空
+    #[allow(dead_code)] // 公开 API，供外部使用
+    pub fn is_empty(&self) -> bool {
+        self.tabs.is_empty()
+    }
+
+    /// 获取当前活动索引
+    #[allow(dead_code)] // 公开 API，供外部使用
+    pub fn active_index(&self) -> usize {
+        self.active_index
     }
 }
 
