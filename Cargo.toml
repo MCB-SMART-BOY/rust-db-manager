@@ -134,7 +134,7 @@ opt-level = 1       # 开发时轻度优化，加快编译
 # =============================================================================
 
 [package.metadata.appimage]
-assets = ["icon.png"]
+assets = ["gridix.png"]
 auto_link = true
 auto_link_exclude_list = [
     "libc.so*",
