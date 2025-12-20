@@ -33,6 +33,7 @@ pub struct ConnectionState {
 }
 
 /// 查询相关状态
+#[derive(Default)]
 pub struct QueryState {
     /// 当前选中的表名
     pub selected_table: Option<String>,
@@ -52,22 +53,6 @@ pub struct QueryState {
     pub show_autocomplete: bool,
     /// 当前选中的补全项索引
     pub selected_completion: usize,
-}
-
-impl Default for QueryState {
-    fn default() -> Self {
-        Self {
-            selected_table: None,
-            sql: String::new(),
-            result: None,
-            tab_manager: QueryTabManager::new(),
-            executing: false,
-            last_query_time_ms: None,
-            autocomplete: AutoComplete::new(),
-            show_autocomplete: false,
-            selected_completion: 0,
-        }
-    }
 }
 
 /// 搜索和选择状态

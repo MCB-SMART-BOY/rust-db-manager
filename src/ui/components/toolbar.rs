@@ -187,11 +187,10 @@ impl Toolbar {
                             themes,
                             200.0,
                             actions.open_theme_selector,
-                        ) {
-                            if let Some(&preset) = themes.get(new_idx) {
+                        )
+                            && let Some(&preset) = themes.get(new_idx) {
                                 actions.theme_changed = Some(preset);
                             }
-                        }
                         actions.open_theme_selector = false;
 
                         ui.add_space(4.0);

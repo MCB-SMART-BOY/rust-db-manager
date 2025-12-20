@@ -5,6 +5,7 @@ use crate::core::ThemePreset;
 use egui::{self, Color32, FontId, Pos2, Rect, RichText, CornerRadius, Sense, Stroke, Vec2};
 
 /// ER 图渲染响应
+#[derive(Default)]
 pub struct ERDiagramResponse {
     /// 是否需要刷新数据
     pub refresh_requested: bool,
@@ -12,16 +13,6 @@ pub struct ERDiagramResponse {
     pub layout_requested: bool,
     /// 是否需要适应视图
     pub fit_view_requested: bool,
-}
-
-impl Default for ERDiagramResponse {
-    fn default() -> Self {
-        Self {
-            refresh_requested: false,
-            layout_requested: false,
-            fit_view_requested: false,
-        }
-    }
 }
 
 /// 渲染颜色配置
@@ -583,8 +574,8 @@ impl ERDiagramState {
         }
 
         // 点击选择表格
-        if response.clicked() {
-            if let Some(pos) = response.interact_pointer_pos() {
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos() {
                 let mut found = false;
                 for (i, table) in self.tables.iter().enumerate() {
                     let screen_pos = Pos2::new(
@@ -608,20 +599,18 @@ impl ERDiagramState {
                     }
                 }
             }
-        }
 
         // 拖动
-        if response.dragged() {
-            if let Some(pos) = response.interact_pointer_pos() {
+        if response.dragged()
+            && let Some(pos) = response.interact_pointer_pos() {
                 if self.dragging_table.is_some() {
                     // 拖动表格
                     let delta = response.drag_delta() / self.zoom;
-                    if let Some(idx) = self.dragging_table {
-                        if let Some(table) = self.tables.get_mut(idx) {
+                    if let Some(idx) = self.dragging_table
+                        && let Some(table) = self.tables.get_mut(idx) {
                             table.position.x += delta.x;
                             table.position.y += delta.y;
                         }
-                    }
                 } else {
                     // 检查是否开始拖动某个表
                     for (i, table) in self.tables.iter().enumerate() {
@@ -645,7 +634,6 @@ impl ERDiagramState {
                     }
                 }
             }
-        }
 
         // 拖动结束
         if response.drag_stopped() {

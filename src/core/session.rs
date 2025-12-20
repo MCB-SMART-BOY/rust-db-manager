@@ -178,11 +178,10 @@ impl SessionState {
 
     /// 清除会话文件
     pub fn clear() -> Result<(), String> {
-        if let Some(path) = Self::session_path() {
-            if path.exists() {
+        if let Some(path) = Self::session_path()
+            && path.exists() {
                 fs::remove_file(&path).map_err(|e| format!("删除失败: {}", e))?;
             }
-        }
         Ok(())
     }
 

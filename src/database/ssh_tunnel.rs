@@ -154,6 +154,7 @@ struct SshClientHandler;
 impl Handler for SshClientHandler {
     type Error = russh::Error;
 
+    #[allow(clippy::manual_async_fn)]
     fn check_server_key(
         &mut self,
         _server_public_key: &ssh_key::PublicKey,
@@ -407,11 +408,10 @@ impl SshTunnelManager {
         // 检查是否已有隧道
         {
             let tunnels = self.tunnels.read().await;
-            if let Some(tunnel) = tunnels.get(name) {
-                if tunnel.is_running().await {
+            if let Some(tunnel) = tunnels.get(name)
+                && tunnel.is_running().await {
                     return Ok(tunnel.clone());
                 }
-            }
         }
 
         // 创建新隧道

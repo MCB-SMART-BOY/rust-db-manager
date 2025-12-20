@@ -30,6 +30,7 @@ impl Sidebar {
     /// 
     /// 这个函数不再使用 SidePanel，而是直接在传入的 ui 区域内渲染，
     /// 以便与 CentralPanel 内的其他内容（如数据表格）紧密贴合。
+    #[allow(clippy::too_many_arguments)]
     pub fn show_in_ui(
         ui: &mut egui::Ui,
         connection_manager: &mut ConnectionManager,
@@ -181,19 +182,17 @@ impl Sidebar {
                         }
                     }
                     SidebarSection::Databases => {
-                        if let Some(conn) = connection_manager.get_active() {
-                            if let Some(db) = conn.databases.get(*selected_index) {
+                        if let Some(conn) = connection_manager.get_active()
+                            && let Some(db) = conn.databases.get(*selected_index) {
                                 actions.select_database = Some(db.clone());
                             }
-                        }
                     }
                     SidebarSection::Tables => {
-                        if let Some(conn) = connection_manager.get_active() {
-                            if let Some(table) = conn.tables.get(*selected_index) {
+                        if let Some(conn) = connection_manager.get_active()
+                            && let Some(table) = conn.tables.get(*selected_index) {
                                 actions.query_table = Some(table.clone());
                                 *selected_table = Some(table.clone());
                             }
-                        }
                     }
                     SidebarSection::Triggers => {
                         // 触发器选中时可以显示详情（暂时只是选中）

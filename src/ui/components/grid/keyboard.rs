@@ -263,11 +263,10 @@ fn handle_normal_mode(
         state.mode = GridMode::Insert;
         state.editing_cell = Some(state.cursor);
         state.edit_text.clear();
-        if let Some((_, row_data)) = filtered_rows.get(state.cursor.0) {
-            if let Some(cell) = row_data.get(state.cursor.1) {
+        if let Some((_, row_data)) = filtered_rows.get(state.cursor.0)
+            && let Some(cell) = row_data.get(state.cursor.1) {
                 state.original_value = cell.to_string();
             }
-        }
         actions.message = Some("修改单元格 (c)".to_string());
     }
     if i.key_pressed(Key::V) && state.command_buffer.is_empty() {
@@ -310,12 +309,11 @@ fn handle_normal_mode(
         }
         state.command_buffer.clear();
     }
-    if i.key_pressed(Key::P) && state.command_buffer.is_empty() {
-        if let Some(text) = &state.clipboard {
+    if i.key_pressed(Key::P) && state.command_buffer.is_empty()
+        && let Some(text) = &state.clipboard {
             state.modified_cells.insert(state.cursor, text.clone());
             actions.message = Some("已粘贴 (p)".to_string());
         }
-    }
     if i.key_pressed(Key::U)
         && !i.modifiers.shift
         && !i.modifiers.ctrl
@@ -346,14 +344,12 @@ fn handle_normal_mode(
         state.quick_filter_input.clear();
     }
     // f 为当前列快速添加筛选（鼠标用户也可用）
-    if i.key_pressed(Key::F) && !i.modifiers.ctrl && state.command_buffer.is_empty() {
-        if let Some(col_name) = result.columns.get(state.cursor.1) {
-            if !state.filters.iter().any(|f| &f.column == col_name) {
+    if i.key_pressed(Key::F) && !i.modifiers.ctrl && state.command_buffer.is_empty()
+        && let Some(col_name) = result.columns.get(state.cursor.1)
+            && !state.filters.iter().any(|f| &f.column == col_name) {
                 state.filters.push(ColumnFilter::new(col_name.clone()));
                 actions.message = Some(format!("为列 {} 添加筛选 (f)", col_name));
             }
-        }
-    }
 
     // === 新增行 ===
     // o: 在末尾添加新行并移动光标到新行
@@ -495,8 +491,8 @@ fn handle_select_mode(
 fn enter_insert_mode(state: &mut DataGridState, filtered_rows: &[(usize, &Vec<String>)]) {
     state.mode = GridMode::Insert;
     state.editing_cell = Some(state.cursor);
-    if let Some((_, row_data)) = filtered_rows.get(state.cursor.0) {
-        if let Some(cell) = row_data.get(state.cursor.1) {
+    if let Some((_, row_data)) = filtered_rows.get(state.cursor.0)
+        && let Some(cell) = row_data.get(state.cursor.1) {
             state.edit_text = state
                 .modified_cells
                 .get(&state.cursor)
@@ -504,5 +500,4 @@ fn enter_insert_mode(state: &mut DataGridState, filtered_rows: &[(usize, &Vec<St
                 .unwrap_or_else(|| cell.to_string());
             state.original_value = cell.to_string();
         }
-    }
 }

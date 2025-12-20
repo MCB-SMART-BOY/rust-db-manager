@@ -3,14 +3,9 @@ use crate::ui::dialogs::keyboard;
 use crate::ui::styles::{DANGER, GRAY, SUCCESS};
 use egui::{self, Key, RichText};
 
+#[derive(Default)]
 pub struct HistoryPanelState {
     pub selected_index: usize,
-}
-
-impl Default for HistoryPanelState {
-    fn default() -> Self {
-        Self { selected_index: 0 }
-    }
 }
 
 pub struct HistoryPanel;
@@ -69,13 +64,12 @@ impl HistoryPanel {
                 }
                 
                 // Enter/l 选择当前项
-                if ctx.input(|i| i.key_pressed(Key::Enter) || i.key_pressed(Key::L)) {
-                    if let Some(item) = history.items().get(state.selected_index) {
+                if ctx.input(|i| i.key_pressed(Key::Enter) || i.key_pressed(Key::L))
+                    && let Some(item) = history.items().get(state.selected_index) {
                         *selected_sql = Some(item.sql.clone());
                         *show = false;
                         return;
                     }
-                }
             }
         }
 

@@ -428,11 +428,9 @@ impl SqlEditor {
                     *selected_completion = selected_completion.saturating_sub(1);
                 }
                 // Tab 键应用选中的补全
-                if i.key_pressed(Key::Tab) {
-                    if *selected_completion < completions.len() {
-                        apply_completion(sql_input, &completions[*selected_completion].insert_text);
-                        *show_autocomplete = false;
-                    }
+                if i.key_pressed(Key::Tab) && *selected_completion < completions.len() {
+                    apply_completion(sql_input, &completions[*selected_completion].insert_text);
+                    *show_autocomplete = false;
                 }
                 if i.key_pressed(Key::Escape) {
                     *show_autocomplete = false;

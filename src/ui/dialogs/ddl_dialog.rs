@@ -493,8 +493,8 @@ impl DdlDialog {
 
             // 空格切换主键
             ctx.input(|i| {
-                if i.key_pressed(Key::Space) && i.modifiers.is_none() {
-                    if let Some(col) = state.table.columns.get_mut(state.selected_column) {
+                if i.key_pressed(Key::Space) && i.modifiers.is_none()
+                    && let Some(col) = state.table.columns.get_mut(state.selected_column) {
                         let new_pk = !col.primary_key;
                         col.primary_key = new_pk;
                         if new_pk {
@@ -507,7 +507,6 @@ impl DdlDialog {
                             }
                         }
                     }
-                }
             });
         }
 

@@ -32,19 +32,18 @@ impl DbManagerApp {
             }
             
             // Ctrl+Shift+N: 新建表
-            if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N) {
-                if let Some(conn) = self.manager.get_active() {
-                    if conn.selected_database.is_some() {
-                        let db_type = conn.config.db_type.clone();
-                        self.ddl_dialog_state.open_create_table(db_type);
-                    }
-                }
+            if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N)
+                && let Some(conn) = self.manager.get_active()
+                && conn.selected_database.is_some()
+            {
+                let db_type = conn.config.db_type;
+                self.ddl_dialog_state.open_create_table(db_type);
             }
 
             // Ctrl+Shift+D: 新建数据库
             if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::D) {
                 let db_type = self.manager.get_active()
-                    .map(|c| c.config.db_type.clone())
+                    .map(|c| c.config.db_type)
                     .unwrap_or_default();
                 self.create_db_dialog_state.open(db_type);
             }
@@ -52,7 +51,7 @@ impl DbManagerApp {
             // Ctrl+Shift+U: 新建用户
             if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::U) {
                 if let Some(conn) = self.manager.get_active() {
-                    let db_type = conn.config.db_type.clone();
+                    let db_type = conn.config.db_type;
                     if matches!(db_type, crate::database::DatabaseType::SQLite) {
                         self.notifications.warning("SQLite 不支持用户管理");
                     } else {
@@ -92,10 +91,10 @@ impl DbManagerApp {
             }
 
             // F5: 刷新表列表
-            if i.key_pressed(egui::Key::F5) {
-                if let Some(name) = self.manager.active.clone() {
-                    self.connect(name);
-                }
+            if i.key_pressed(egui::Key::F5)
+                && let Some(name) = self.manager.active.clone()
+            {
+                self.connect(name);
             }
 
             // Ctrl+L: 清空命令行
@@ -139,13 +138,11 @@ impl DbManagerApp {
             }
 
             // Ctrl+F: 添加筛选条件
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::F) && !i.modifiers.shift {
-                if let Some(result) = &self.result {
-                    if let Some(col) = result.columns.first() {
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::F) && !i.modifiers.shift
+                && let Some(result) = &self.result
+                    && let Some(col) = result.columns.first() {
                         self.grid_state.filters.push(ui::components::ColumnFilter::new(col.clone()));
                     }
-                }
-            }
 
             // Ctrl+Shift+F: 清空筛选条件
             if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F) {

@@ -101,7 +101,7 @@ impl CreateUserDialogState {
     /// 打开对话框
     pub fn open(&mut self, db_type: DatabaseType, databases: Vec<String>) {
         self.reset();
-        self.db_type = db_type.clone();
+        self.db_type = db_type;
         self.available_databases = databases;
         self.show = true;
         

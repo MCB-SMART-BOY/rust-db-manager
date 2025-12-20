@@ -334,11 +334,10 @@ impl SqlHighlighter {
             // 保持原样
         } else if job.text.ends_with('\n') && !text.ends_with('\n') {
             job.text.pop();
-            if let Some(section) = job.sections.last_mut() {
-                if section.byte_range.end > job.text.len() {
+            if let Some(section) = job.sections.last_mut()
+                && section.byte_range.end > job.text.len() {
                     section.byte_range.end = job.text.len();
                 }
-            }
         }
 
         job

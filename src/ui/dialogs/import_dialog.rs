@@ -196,9 +196,10 @@ impl ImportState {
 }
 
 /// 导入操作结果
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ImportAction {
     /// 无操作
+    #[default]
     None,
     /// 选择文件
     SelectFile,
@@ -239,24 +240,20 @@ impl ImportDialog {
             }
 
             // Enter 执行导入
-            if can_import {
-                match keyboard::handle_dialog_keys(ctx) {
-                    keyboard::DialogAction::Confirm => {
-                        return match state.mode {
-                            ImportMode::Execute => ImportAction::Execute,
-                            ImportMode::CopyToEditor => {
-                                if let Some(ref preview) = state.preview {
-                                    let sql = preview.sql_statements.join("\n\n");
-                                    ImportAction::CopyToEditor(sql)
-                                } else {
-                                    ImportAction::None
-                                }
+            if can_import
+                && let keyboard::DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
+                    return match state.mode {
+                        ImportMode::Execute => ImportAction::Execute,
+                        ImportMode::CopyToEditor => {
+                            if let Some(ref preview) = state.preview {
+                                let sql = preview.sql_statements.join("\n\n");
+                                ImportAction::CopyToEditor(sql)
+                            } else {
+                                ImportAction::None
                             }
-                        };
-                    }
-                    _ => {}
+                        }
+                    };
                 }
-            }
 
             ctx.input(|i| {
                 // 数字键快速选择格式: 1=SQL, 2=CSV, 3=JSON
