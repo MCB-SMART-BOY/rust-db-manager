@@ -18,10 +18,10 @@ rustPlatform.buildRustPackage (finalAttrs: {
     owner = "MCB-SMART-BOY";
     repo = "Gridix";
     tag = "v${finalAttrs.version}";
-    hash = ""; # TODO: 更新 hash
+    hash = "sha256-N5ijpU38McKd6h2YmYKxZivoqkgQPtjlUDfTdcOnL3E=";
   };
 
-  cargoHash = ""; # TODO: 更新 cargoHash
+  cargoHash = "sha256-EW6fVDYD2Fsw8hNhwN/M9tT53ivRl1uc/JqQMgIH57k=";
 
   nativeBuildInputs = [
     pkg-config
