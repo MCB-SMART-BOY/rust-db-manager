@@ -1,5 +1,428 @@
 # Gridix
 
+[English](#english) | [中文](#中文)
+
+---
+
+<a id="english"></a>
+
+> A database tool for those who hate touching the mouse
+
+![Version](https://img.shields.io/badge/version-0.5.2-green.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
+[![AUR](https://img.shields.io/aur/version/gridix-bin?label=AUR)](https://aur.archlinux.org/packages/gridix-bin)
+[![Flathub](https://img.shields.io/flathub/v/io.github.mcb_smart_boy.Gridix)](https://flathub.org/apps/io.github.mcb_smart_boy.Gridix)
+
+**Gridix** = Grid + Helix. Navigate databases with `hjkl`, edit tables the Vim way.
+
+![Screenshot](gridix.png)
+
+## Why Gridix?
+
+**Fast** - Pure Rust, starts in under 1 second, 22MB single binary, not another Electron app
+
+**Secure** - SSH tunneling for jump hosts, SSL/TLS encryption, AES-256-GCM password storage
+
+**Intuitive** - Helix keybindings: `hjkl` to move, `c` to change, `gg` `G` to jump
+
+**Beautiful** - 19 themes included: Catppuccin, Tokyo Night, Dracula, and more
+
+**Complete** - SQLite, PostgreSQL, MySQL - all major databases supported
+
+## Installation
+
+### Arch Linux (AUR)
+
+```bash
+paru -S gridix-bin          # Pre-compiled, instant install
+paru -S gridix-appimage     # AppImage with bundled dependencies
+paru -S gridix              # Build from source
+```
+
+### NixOS / Nix
+
+```bash
+# nixpkgs (unstable)
+nix-shell -p gridix
+
+# Or use flake
+nix run github:MCB-SMART-BOY/Gridix
+```
+
+### Flatpak (Flathub)
+
+```bash
+flatpak install flathub io.github.mcb_smart_boy.Gridix
+flatpak run io.github.mcb_smart_boy.Gridix
+```
+
+### macOS / Linux (Homebrew)
+
+```bash
+brew tap MCB-SMART-BOY/gridix
+brew install gridix
+```
+
+### Pre-built Binaries
+
+Download from [Releases](https://github.com/MCB-SMART-BOY/gridix/releases):
+
+| Platform | File | Size |
+|----------|------|------|
+| Linux | `gridix-linux-x86_64.tar.gz` | ~13 MB |
+| Linux | `gridix.AppImage` | ~17 MB |
+| Windows | `gridix-windows-x86_64.zip` | ~12 MB |
+| macOS (M1/M2/M3/M4) | `gridix-macos-arm64.tar.gz` | ~12 MB |
+| macOS (Intel) | `gridix-macos-x86_64.tar.gz` | ~12 MB |
+
+### Build from Source
+
+```bash
+git clone https://github.com/MCB-SMART-BOY/gridix.git
+cd gridix
+cargo build --release
+```
+
+<details>
+<summary>Linux Dependencies</summary>
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install libgtk-3-dev libxdo-dev
+
+# Fedora
+sudo dnf install gtk3-devel libxdo-devel
+
+# Arch
+sudo pacman -S gtk3 xdotool
+
+# openSUSE
+sudo zypper install gtk3-devel libxdo-devel
+```
+</details>
+
+## Quick Start
+
+1. Launch the application
+2. Press `Ctrl+N` to create a new connection
+3. Select database type, enter connection details, press Enter
+4. Click a table in the sidebar
+5. Navigate with `hjkl`
+
+## Keyboard Controls
+
+This is the core feature. Pay attention.
+
+### Global Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+N` | New connection |
+| `Ctrl+Enter` | Execute SQL |
+| `Ctrl+B` | Toggle sidebar |
+| `Ctrl+J` | Toggle SQL editor |
+| `Ctrl+H` | Query history |
+| `Ctrl+E` | Export data |
+| `Ctrl+I` | Import data |
+| `Ctrl+T` | Theme picker |
+| `Ctrl+D` | Toggle day/night mode |
+| `Ctrl+1/2/3` | Quick switch connection/database/table |
+| `Ctrl++/-/0` | Zoom in/out/reset |
+| `Ctrl+F` | Add filter |
+| `Ctrl+Shift+F` | Clear filters |
+| `Ctrl+G` | Go to row |
+| `Ctrl+S` | Save changes |
+| `F5` | Refresh table list |
+| `F1` | Help |
+
+### Grid Navigation (Normal Mode)
+
+```
+Basic movement:
+     k
+   h   l      ← These four keys: up, down, left, right
+     j
+
+Quick jumps:
+  gg    → Jump to first row
+  G     → Jump to last row
+  gh    → Jump to first column
+  gl    → Jump to last column
+
+Scrolling:
+  Ctrl+u  → Scroll up half page
+  Ctrl+d  → Scroll down half page
+
+Numeric prefix:
+  5j    → Move down 5 rows
+  10k   → Move up 10 rows
+  3w    → Move right 3 columns
+```
+
+### Grid Editing
+
+| Key | Action |
+|-----|--------|
+| `i` | Insert at current position |
+| `a` | Insert after current position |
+| `c` | Change cell content |
+| `r` | Replace cell |
+| `d` | Delete content |
+| `y` | Copy |
+| `p` | Paste |
+| `u` | Undo |
+| `o` | Insert row below |
+| `O` | Insert row above |
+| `Space d` | Mark row for deletion |
+
+### Selection Mode
+
+| Key | Action |
+|-----|--------|
+| `v` | Enter selection mode |
+| `x` | Select entire row |
+| `Esc` | Exit selection mode |
+
+### Insert Mode
+
+| Key | Action |
+|-----|--------|
+| `Esc` | Exit insert mode |
+| `Enter` | Confirm input |
+
+## Database Support
+
+| Database | Default Port | Special Features |
+|----------|--------------|------------------|
+| SQLite | - | Local file, zero config |
+| PostgreSQL | 5432 | Full feature support |
+| MySQL/MariaDB | 3306 | SSL/TLS encryption |
+
+## SSH Tunneling
+
+Can't reach your remote database? Need to go through a jump host? Use SSH tunneling:
+
+```
+Your machine → SSH server → Database server
+```
+
+Two authentication methods:
+- Password authentication
+- Private key authentication (OpenSSH format supported)
+
+Enable "SSH Tunnel" in the connection dialog and fill in SSH details.
+
+## MySQL SSL/TLS
+
+5 security levels:
+
+| Mode | Description |
+|------|-------------|
+| Disabled | No encryption (default) |
+| Preferred | Encrypt if possible |
+| Required | Must encrypt |
+| VerifyCa | Verify server certificate |
+| VerifyIdentity | Verify certificate + hostname |
+
+## Import & Export
+
+### Export
+
+Three formats supported:
+- **CSV** - Custom separator, quote character, headers optional
+- **JSON** - Pretty print or compact
+- **SQL** - INSERT statements, optional transaction wrapping
+
+Select specific columns, row ranges, and export paths.
+
+### Import
+
+Supports:
+- **CSV/TSV** - Auto-detect separator
+- **JSON** - Arrays and nested objects
+- **SQL** - Direct execution
+
+Preview before execution to verify data.
+
+## Advanced Filtering
+
+16 operators:
+
+| Type | Operators |
+|------|-----------|
+| Text Match | Contains, NotContains, Equals, NotEquals |
+| Text Pattern | StartsWith, EndsWith, Regex |
+| Numeric | GreaterThan, GreaterOrEqual, LessThan, LessOrEqual |
+| Range | Between |
+| Null Check | Empty, NotEmpty |
+| Logic | AND, OR combinations |
+
+Press `/` to open quick filter dialog.
+
+## Theme System
+
+**Dark (11 themes):**
+Tokyo Night, Tokyo Night Storm, Catppuccin Mocha, Catppuccin Macchiato, Catppuccin Frappé, One Dark, One Dark Vivid, Gruvbox Dark, Dracula, Nord, GitHub Dark
+
+**Light (8 themes):**
+Tokyo Night Light, Catppuccin Latte, One Light, Gruvbox Light, Solarized Light, GitHub Light, Monokai Pro, Solarized Dark
+
+Day and night modes configured independently. Auto-switches between light and dark.
+
+`Ctrl+D` to toggle, `Ctrl+T` to open picker.
+
+## SQL Editor
+
+- **Syntax Highlighting** - Keywords, strings, comments, numbers all colored
+- **Auto-complete** - 149 SQL keywords + 50 functions + table/column names
+- **SQL Formatting** - One-click beautification
+
+## Configuration
+
+| System | Path |
+|--------|------|
+| Linux | `~/.config/gridix/config.toml` |
+| macOS | `~/Library/Application Support/gridix/config.toml` |
+| Windows | `%APPDATA%\gridix\config.toml` |
+
+Stores:
+- Database connections (passwords encrypted)
+- Theme settings
+- Window position and size
+- Zoom level
+- Query history
+
+## Technical Details
+
+| Component | Technology |
+|-----------|------------|
+| GUI | egui/eframe 0.29 |
+| Async | Tokio |
+| SQLite | rusqlite |
+| PostgreSQL | tokio-postgres |
+| MySQL | mysql_async |
+| SSH | russh |
+| Encryption | ring (AES-256-GCM) |
+| Syntax Highlighting | syntect |
+
+Stats:
+- Lines of code: ~10,000 Rust
+- Binary size: ~22 MB
+- Memory usage: ~50 MB (varies with data)
+- Startup time: < 1 second
+
+## Project Structure
+
+```
+src/
+├── main.rs              # Entry point
+├── app.rs               # Main logic
+├── core/                # Core functionality
+│   ├── autocomplete.rs  # Auto-completion
+│   ├── config.rs        # Configuration
+│   ├── export.rs        # Import/export
+│   ├── formatter.rs     # SQL formatting
+│   ├── history.rs       # Query history
+│   ├── syntax.rs        # Syntax highlighting
+│   └── theme.rs         # Themes
+├── database/            # Database layer
+│   ├── mod.rs           # Connection pool
+│   ├── query.rs         # Query engine
+│   └── ssh_tunnel.rs    # SSH tunneling
+└── ui/                  # Interface
+    ├── components/      # Components
+    ├── dialogs/         # Dialogs
+    └── panels/          # Panels
+```
+
+## Changelog
+
+### v0.5.2 (2025-12-20)
+- Fixed LICENSE file not included in release tags
+- Updated packaging configuration
+
+### v0.5.1 (2025-12-20)
+- Published to AUR (gridix-bin / gridix / gridix-appimage)
+- Added AppImage packaging
+- Fixed GitHub Actions macOS builds
+
+### v0.5.0 (2025-12-20)
+- Complete Helix keyboard support
+- History panel supports j/k/g/G navigation
+- Smart column width auto-fit
+- Improved dialog focus management
+
+### v0.4.0 (2025-12-18)
+- All dialogs support keyboard navigation
+- Esc/q to close, Enter to confirm
+- Confirm dialogs support y/n
+- GitHub Actions automated builds
+
+### v0.3.0 (2025-12-15)
+- Sidebar Ctrl+1/2/3 quick switch
+- Sidebar j/k/g/G/Enter navigation
+- Data import functionality
+- About dialog
+
+### v0.2.0 (2025-12-10)
+- MySQL SSL/TLS (5 modes)
+- SSH tunnel connections
+- Multi-tab queries
+- DDL viewing
+
+### v0.1.0 (2024-12-09)
+- Initial release
+- SQLite/PostgreSQL/MySQL support
+- Helix keybindings
+- 19 themes
+- SQL auto-completion
+
+## Development
+
+```bash
+# Clone
+git clone https://github.com/MCB-SMART-BOY/gridix.git
+cd gridix
+
+# Development run
+cargo run
+
+# Test
+cargo test
+
+# Lint
+cargo clippy
+
+# Release build
+cargo build --release
+
+# Package AppImage
+cargo appimage
+```
+
+## Contributing
+
+- Report bugs: [Issues](https://github.com/MCB-SMART-BOY/gridix/issues)
+- Suggestions: [Discussions](https://github.com/MCB-SMART-BOY/gridix/discussions)
+- Code contributions: [Pull Requests](https://github.com/MCB-SMART-BOY/gridix/pulls)
+
+## Acknowledgments
+
+- [egui](https://github.com/emilk/egui) - Immediate mode GUI framework
+- [Helix](https://helix-editor.com/) - Keybinding inspiration
+- [Catppuccin](https://github.com/catppuccin) - Beautiful color schemes
+- [syntect](https://github.com/trishume/syntect) - Syntax highlighting engine
+
+## License
+
+MIT License - Use freely, modify as you wish, commercial use allowed.
+
+---
+
+<a id="中文"></a>
+
 > 给不想碰鼠标的人做的数据库工具
 
 ![Version](https://img.shields.io/badge/version-0.5.2-green.svg)
@@ -7,6 +430,7 @@
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 [![AUR](https://img.shields.io/aur/version/gridix-bin?label=AUR)](https://aur.archlinux.org/packages/gridix-bin)
+[![Flathub](https://img.shields.io/flathub/v/io.github.mcb_smart_boy.Gridix)](https://flathub.org/apps/io.github.mcb_smart_boy.Gridix)
 
 **Gridix** = Grid + Helix。用 `hjkl` 操作数据库，用 Vim 的方式编辑表格。
 
@@ -257,10 +681,10 @@ sudo zypper install gtk3-devel libxdo-devel
 ## 主题系统
 
 **暗色（11套）：**
-Tokyo Night, Tokyo Night Storm, Catppuccin Mocha, Catppuccin Macchiato, Catppuccin Frappé, One Dark, One Dark Vivid, Gruvbox Dark, Dracula, Nord, Monokai Pro, GitHub Dark
+Tokyo Night, Tokyo Night Storm, Catppuccin Mocha, Catppuccin Macchiato, Catppuccin Frappé, One Dark, One Dark Vivid, Gruvbox Dark, Dracula, Nord, GitHub Dark
 
 **亮色（8套）：**
-Tokyo Night Light, Catppuccin Latte, One Light, Gruvbox Light, Solarized Light, GitHub Light
+Tokyo Night Light, Catppuccin Latte, One Light, Gruvbox Light, Solarized Light, GitHub Light, Monokai Pro, Solarized Dark
 
 日夜模式独立配置，白天自动用亮色，晚上自动用暗色。
 
@@ -414,4 +838,4 @@ MIT License - 随便用，改着玩，商用也行。
 
 ---
 
-*少点鼠标，多写代码。* ⌨️
+*Less mouse, more code.*
