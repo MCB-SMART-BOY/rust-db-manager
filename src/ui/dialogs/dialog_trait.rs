@@ -6,9 +6,10 @@
 #![allow(dead_code)] // 公开 API，供未来使用
 
 /// 对话框操作结果
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DialogResult<T> {
     /// 无操作（对话框保持打开）
+    #[default]
     None,
     /// 用户确认，返回结果数据
     Confirm(T),
@@ -58,20 +59,17 @@ impl<T> DialogResult<T> {
     }
 }
 
-impl<T> Default for DialogResult<T> {
-    fn default() -> Self {
-        DialogResult::None
-    }
-}
+
 
 /// 对话框尺寸预设
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum DialogSize {
     /// 小型对话框（确认框、简单输入）
     /// 宽度约 320px
     Small,
     /// 中型对话框（普通表单）
     /// 宽度约 420px
+    #[default]
     Medium,
     /// 大型对话框（复杂表单、预览）
     /// 宽度约 520px
@@ -99,12 +97,6 @@ impl DialogSize {
             DialogSize::Large => 600.0,
             DialogSize::Custom { max_height, .. } => *max_height,
         }
-    }
-}
-
-impl Default for DialogSize {
-    fn default() -> Self {
-        DialogSize::Medium
     }
 }
 

@@ -79,16 +79,14 @@ pub fn show_quick_filter_dialog(
                 ui.horizontal(|ui| {
                     let can_add = parsed.is_ok();
                     
-                    if ui
+                    if (ui
                         .add_enabled(can_add, egui::Button::new("添加筛选 [Enter]"))
                         .clicked()
-                        || (can_add && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                    {
-                        if let Ok(filter) = parsed {
+                        || (can_add && ui.input(|i| i.key_pressed(egui::Key::Enter))))
+                        && let Ok(filter) = parsed {
                             result = Some(filter);
                             should_close = true;
                         }
-                    }
 
                     if ui.button("取消 [Esc]").clicked()
                         || ui.input(|i| i.key_pressed(egui::Key::Escape))

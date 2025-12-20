@@ -120,11 +120,10 @@ impl ProgressManager {
 
     /// 取消任务
     pub fn cancel(&mut self, id: u64) {
-        if let Some(task) = self.tasks.get(&id) {
-            if task.cancellable {
+        if let Some(task) = self.tasks.get(&id)
+            && task.cancellable {
                 task.cancel();
             }
-        }
         self.tasks.remove(&id);
     }
 

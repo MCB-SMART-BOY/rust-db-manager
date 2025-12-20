@@ -74,14 +74,14 @@ impl ExportConfig {
         self.selected_columns
             .iter()
             .enumerate()
-            .filter(|(_, &selected)| selected)
+            .filter(|&(_, selected)| *selected)
             .map(|(i, _)| i)
             .collect()
     }
 
     /// 是否全选
     pub fn all_columns_selected(&self) -> bool {
-        self.selected_columns.iter().all(|&s| s)
+        self.selected_columns.iter().all(|s| *s)
     }
 
     /// 选中的列数
@@ -124,15 +124,11 @@ impl ExportDialog {
             }
 
             // Enter 导出
-            if can_export {
-                match keyboard::handle_dialog_keys(ctx) {
-                    keyboard::DialogAction::Confirm => {
-                        *on_export = Some(config.clone());
-                        return;
-                    }
-                    _ => {}
+            if can_export
+                && let keyboard::DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
+                    *on_export = Some(config.clone());
+                    return;
                 }
-            }
 
             ctx.input(|i| {
                 // 数字键快速选择格式: 1=CSV, 2=SQL, 3=JSON
@@ -178,11 +174,10 @@ impl ExportDialog {
                     }
 
                     // Space 切换当前列
-                    if i.key_pressed(Key::Space) {
-                        if let Some(selected) = config.selected_columns.get_mut(config.nav_column_index) {
+                    if i.key_pressed(Key::Space)
+                        && let Some(selected) = config.selected_columns.get_mut(config.nav_column_index) {
                             *selected = !*selected;
                         }
-                    }
 
                     // a 全选/取消全选
                     if i.key_pressed(Key::A) {

@@ -5,13 +5,14 @@
 //!
 //! ## 子模块
 //!
-//! - [`database`]: 数据库连接和查询操作
-//! - [`export`]: 数据导出功能
-//! - [`import`]: 数据导入功能
-//! - [`keyboard`]: 键盘快捷键处理
-//! - [`message`]: 异步消息定义
+//! - `database`: 数据库连接和查询操作
+//! - `export`: 数据导出功能
+//! - `import`: 数据导入功能
+//! - `keyboard`: 键盘快捷键处理
+//! - `message`: 异步消息定义
 
 mod database;
+mod dialogs;
 mod export;
 mod import;
 mod keyboard;
@@ -23,12 +24,12 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::core::{
     clear_highlight_cache, constants, format_sql, AppConfig, AutoComplete, HighlightColors,
-    NotificationManager, ProgressManager, QueryHistory, ThemeManager, ThemePreset,
+    KeyBindings, NotificationManager, ProgressManager, QueryHistory, ThemeManager, ThemePreset,
 };
 use crate::database::{ConnectionConfig, ConnectionManager, QueryResult};
 use crate::ui::{
-    self, DdlDialogState, ExportConfig, QueryTabBar, QueryTabManager, SqlEditorActions,
-    ToolbarActions,
+    self, DdlDialogState, ExportConfig, KeyBindingsDialogState, QueryTabBar, QueryTabManager,
+    SqlEditorActions, ToolbarActions,
 };
 
 use message::Message;
@@ -179,6 +180,10 @@ pub struct DbManagerApp {
     create_db_dialog_state: ui::CreateDbDialogState,
     /// 新建用户对话框状态
     create_user_dialog_state: ui::CreateUserDialogState,
+    /// 快捷键绑定
+    keybindings: KeyBindings,
+    /// 快捷键设置对话框状态
+    keybindings_dialog_state: KeyBindingsDialogState,
     /// 中央面板左右分割比例 (0.0-1.0, 左侧占比)
     central_panel_ratio: f32,
     /// 是否显示 ER 图面板
@@ -201,6 +206,7 @@ impl DbManagerApp {
             || self.ddl_dialog_state.show
             || self.create_db_dialog_state.show
             || self.create_user_dialog_state.show
+            || self.keybindings_dialog_state.show
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -293,6 +299,8 @@ impl DbManagerApp {
             ddl_dialog_state: DdlDialogState::default(),
             create_db_dialog_state: ui::CreateDbDialogState::new(),
             create_user_dialog_state: ui::CreateUserDialogState::new(),
+            keybindings: KeyBindings::default(),
+            keybindings_dialog_state: KeyBindingsDialogState::default(),
             central_panel_ratio: 0.65,
             show_er_diagram: false,
             er_diagram_state: ui::ERDiagramState::new(),
@@ -527,11 +535,10 @@ impl DbManagerApp {
                             }
                             
                             // 更新列名到自动补全（当有选中表且返回了列信息时）
-                            if let Some(table) = &self.selected_table {
-                                if !res.columns.is_empty() {
+                            if let Some(table) = &self.selected_table
+                                && !res.columns.is_empty() {
                                     self.autocomplete.set_columns(table.clone(), res.columns.clone());
                                 }
-                            }
                             
                             self.result = Some(res);
                         }
@@ -555,11 +562,10 @@ impl DbManagerApp {
                     if self.selected_table.as_deref() == Some(&table_name) {
                         if let Some(pk_name) = pk_column {
                             // 在当前结果的列中查找主键列的索引
-                            if let Some(result) = &self.result {
-                                if let Some(idx) = result.columns.iter().position(|c| c == &pk_name) {
+                            if let Some(result) = &self.result
+                                && let Some(idx) = result.columns.iter().position(|c| c == &pk_name) {
                                     self.grid_state.primary_key_column = Some(idx);
                                 }
-                            }
                         } else {
                             self.grid_state.primary_key_column = None;
                         }
@@ -583,11 +589,10 @@ impl DbManagerApp {
                         Ok(fks) => {
                             // 更新表中列的外键标记
                             for fk in &fks {
-                                if let Some(table) = self.er_diagram_state.tables.iter_mut().find(|t| t.name == fk.from_table) {
-                                    if let Some(col) = table.columns.iter_mut().find(|c| c.name == fk.from_column) {
+                                if let Some(table) = self.er_diagram_state.tables.iter_mut().find(|t| t.name == fk.from_table)
+                                    && let Some(col) = table.columns.iter_mut().find(|c| c.name == fk.from_column) {
                                         col.is_foreign_key = true;
                                     }
-                                }
                             }
                             
                             // 将外键信息转换为 ER 图关系
@@ -850,7 +855,6 @@ impl eframe::App for DbManagerApp {
             ctx.request_repaint();
         }
 
-        let mut save_connection = false;
         let mut toolbar_actions = ToolbarActions::default();
 
         // 检测下拉框快捷键（仅在没有对话框打开时响应）
@@ -918,172 +922,9 @@ impl eframe::App for DbManagerApp {
         });
 
         // ===== 对话框 =====
-
-        // 连接对话框
-        ui::ConnectionDialog::show(
-            ctx,
-            &mut self.show_connection_dialog,
-            &mut self.new_config,
-            &mut save_connection,
-        );
-
-        // 删除确认对话框
-        let mut confirm_delete = false;
-        let delete_msg = self
-            .pending_delete_name
-            .as_ref()
-            .map(|n| format!("确定要删除连接 '{}' 吗？", n))
-            .unwrap_or_default();
-        ui::ConfirmDialog::show(
-            ctx,
-            &mut self.show_delete_confirm,
-            "删除连接",
-            &delete_msg,
-            "删除",
-            &mut confirm_delete,
-        );
-
-        if confirm_delete {
-            if let Some(name) = self.pending_delete_name.take() {
-                self.delete_connection(&name);
-            }
-        }
-
-        // 导出对话框
-        let mut export_action: Option<ExportConfig> = None;
-        let table_name = self
-            .selected_table
-            .clone()
-            .unwrap_or_else(|| "result".to_string());
-        ui::ExportDialog::show(
-            ctx,
-            &mut self.show_export_dialog,
-            &mut self.export_config,
-            &table_name,
-            self.result.as_ref(),
-            &mut export_action,
-            &self.export_status,
-        );
-
-        if let Some(config) = export_action {
-            self.handle_export_with_config(config);
-        }
-
-        // 导入对话框
-        let is_mysql = self.is_mysql();
-        let import_action = ui::ImportDialog::show(
-            ctx,
-            &mut self.show_import_dialog,
-            &mut self.import_state,
-            is_mysql,
-        );
-        
-        match import_action {
-            ui::ImportAction::SelectFile => {
-                self.select_import_file();
-                // 选择文件后自动加载预览
-                if self.import_state.file_path.is_some() {
-                    self.refresh_import_preview();
-                }
-            }
-            ui::ImportAction::RefreshPreview => {
-                self.refresh_import_preview();
-            }
-            ui::ImportAction::Execute => {
-                self.execute_import();
-            }
-            ui::ImportAction::CopyToEditor(sql) => {
-                self.sql = sql;
-                self.show_sql_editor = true;
-                self.focus_sql_editor = true;
-                self.show_import_dialog = false;
-                self.import_state.clear();
-                self.notifications.success("SQL 已复制到编辑器");
-            }
-            ui::ImportAction::Close => {
-                self.import_state.clear();
-            }
-            ui::ImportAction::None => {}
-        }
-
-        // DDL 对话框（创建表）
-        let ddl_result = ui::DdlDialog::show_create_table(
-            ctx,
-            &mut self.ddl_dialog_state,
-        );
-        if let Some(create_sql) = ddl_result {
-            // 将生成的 SQL 放入编辑器
-            self.sql = create_sql;
-            self.show_sql_editor = true;
-            self.focus_sql_editor = true;
-        }
-
-        // 新建数据库对话框
-        let create_db_result = ui::CreateDbDialog::show(
-            ctx,
-            &mut self.create_db_dialog_state,
-        );
-        match create_db_result {
-            ui::CreateDbDialogResult::Create(sql) => {
-                if sql.starts_with("SQLITE_CREATE:") {
-                    // SQLite 特殊处理：创建新连接
-                    let path = sql.trim_start_matches("SQLITE_CREATE:");
-                    self.notifications.info(format!("SQLite 数据库将创建于: {}", path));
-                    // TODO: 可以考虑自动创建新连接
-                } else {
-                    // 将 SQL 放入编辑器并执行
-                    self.sql = sql;
-                    self.show_sql_editor = true;
-                    self.focus_sql_editor = true;
-                    self.notifications.info("SQL 已生成，按 Ctrl+Enter 执行");
-                }
-            }
-            ui::CreateDbDialogResult::Cancelled => {}
-            ui::CreateDbDialogResult::None => {}
-        }
-
-        // 新建用户对话框
-        let create_user_result = ui::CreateUserDialog::show(
-            ctx,
-            &mut self.create_user_dialog_state,
-        );
-        match create_user_result {
-            ui::CreateUserDialogResult::Create(statements) => {
-                // 将所有 SQL 语句放入编辑器
-                self.sql = statements.join("\n");
-                self.show_sql_editor = true;
-                self.focus_sql_editor = true;
-                self.notifications.info("SQL 已生成，按 Ctrl+Enter 执行");
-            }
-            ui::CreateUserDialogResult::Cancelled => {}
-            ui::CreateUserDialogResult::None => {}
-        }
-
-        // 历史记录面板
-        let mut history_selected_sql: Option<String> = None;
-        let mut clear_history = false;
-        ui::HistoryPanel::show(
-            ctx,
-            &mut self.show_history_panel,
-            &self.query_history,
-            &mut history_selected_sql,
-            &mut clear_history,
-            &mut self.history_panel_state,
-        );
-
-        if let Some(sql) = history_selected_sql {
-            self.sql = sql;
-        }
-
-        if clear_history {
-            self.query_history.clear();
-        }
-
-        // 帮助面板（带 Helix 键位支持）
-        ui::HelpDialog::show_with_scroll(ctx, &mut self.show_help, &mut self.help_scroll_offset);
-        
-        // 关于对话框
-        ui::AboutDialog::show(ctx, &mut self.show_about);
+        let dialog_results = self.render_dialogs(ctx);
+        let save_connection = dialog_results.save_connection;
+        self.handle_dialog_results(dialog_results);
 
         // ===== 底部 SQL 编辑器 =====
         let mut sql_editor_actions = SqlEditorActions::default();
@@ -1475,12 +1316,11 @@ impl eframe::App for DbManagerApp {
                                         }
 
                                         // 处理刷新请求
-                                        if grid_actions.refresh_requested {
-                                            if let Some(table) = &self.selected_table {
+                                        if grid_actions.refresh_requested
+                                            && let Some(table) = &self.selected_table {
                                                 let sql = format!("SELECT * FROM {}", table);
                                                 self.execute(sql);
                                             }
-                                        }
                                         
                                         // 处理焦点转移请求
                                         if let Some(transfer) = grid_actions.focus_transfer {
@@ -1531,14 +1371,12 @@ impl eframe::App for DbManagerApp {
                                         ui.label("在底部命令行输入 SQL 查询");
                                         ui.add_space(8.0);
 
-                                        if let Some(table) = &self.selected_table {
-                                            if ui.button(format!("查询表 {} 的数据", table)).clicked() {
-                                                if let Ok(quoted_table) = ui::quote_identifier(table, self.is_mysql()) {
+                                        if let Some(table) = &self.selected_table
+                                            && ui.button(format!("查询表 {} 的数据", table)).clicked()
+                                                && let Ok(quoted_table) = ui::quote_identifier(table, self.is_mysql()) {
                                                     self.sql = format!("SELECT * FROM {} LIMIT {};", quoted_table, constants::database::DEFAULT_QUERY_LIMIT);
                                                     sql_editor_actions.execute = true;
                                                 }
-                                            }
-                                        }
                                     });
                                 } else {
                                     ui.vertical_centered(|ui| {
@@ -1578,20 +1416,18 @@ impl eframe::App for DbManagerApp {
             self.show_sql_editor = !self.show_sql_editor;
         }
 
-        if toolbar_actions.refresh_tables {
-            if let Some(name) = self.manager.active.clone() {
+        if toolbar_actions.refresh_tables
+            && let Some(name) = self.manager.active.clone() {
                 self.connect(name);
             }
-        }
 
         // 处理连接切换
-        if let Some(conn_name) = toolbar_actions.switch_connection {
-            if self.manager.active.as_deref() != Some(&conn_name) {
+        if let Some(conn_name) = toolbar_actions.switch_connection
+            && self.manager.active.as_deref() != Some(&conn_name) {
                 self.connect(conn_name);
                 self.selected_table = None;
                 self.result = None;
             }
-        }
 
         // 处理数据库切换
         if let Some(db_name) = toolbar_actions.switch_database {
@@ -1623,21 +1459,21 @@ impl eframe::App for DbManagerApp {
 
         if toolbar_actions.create_table {
             let db_type = self.manager.get_active()
-                .map(|c| c.config.db_type.clone())
+                .map(|c| c.config.db_type)
                 .unwrap_or_default();
             self.ddl_dialog_state.open_create_table(db_type);
         }
 
         if toolbar_actions.create_database {
             let db_type = self.manager.get_active()
-                .map(|c| c.config.db_type.clone())
+                .map(|c| c.config.db_type)
                 .unwrap_or_default();
             self.create_db_dialog_state.open(db_type);
         }
 
         if toolbar_actions.create_user {
             if let Some(conn) = self.manager.get_active() {
-                let db_type = conn.config.db_type.clone();
+                let db_type = conn.config.db_type;
                 // SQLite 不支持用户管理
                 if matches!(db_type, crate::database::DatabaseType::SQLite) {
                     self.notifications.warning("SQLite 不支持用户管理");
@@ -1702,6 +1538,10 @@ impl eframe::App for DbManagerApp {
         
         if toolbar_actions.show_about {
             self.show_about = true;
+        }
+
+        if toolbar_actions.show_keybindings {
+            self.keybindings_dialog_state.open(&self.keybindings);
         }
 
         // 处理侧边栏操作

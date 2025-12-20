@@ -45,11 +45,10 @@ fn validate_config(config: &ConnectionConfig) -> ValidationResult {
             } else {
                 let path = Path::new(&config.database);
                 // 检查父目录是否存在
-                if let Some(parent) = path.parent() {
-                    if !parent.as_os_str().is_empty() && !parent.exists() {
+                if let Some(parent) = path.parent()
+                    && !parent.as_os_str().is_empty() && !parent.exists() {
                         result.add_error(format!("目录不存在: {}", parent.display()));
                     }
-                }
                 // 检查文件扩展名
                 if let Some(ext) = path.extension() {
                     let ext_lower = ext.to_string_lossy().to_lowercase();
@@ -107,36 +106,34 @@ impl ConnectionDialog {
 
             // Enter 保存（如果验证通过）
             let validation = validate_config(config);
-            if validation.is_valid {
-                if let DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
+            if validation.is_valid
+                && let DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
                     *on_save = true;
                     *open = false;
                     return;
                 }
-            }
 
             // 数据库类型快捷键
             let db_types = DatabaseType::all();
             ctx.input(|i| {
                 // 数字键 1/2/3 选择数据库类型
                 for (idx, key) in [Key::Num1, Key::Num2, Key::Num3].iter().enumerate() {
-                    if i.key_pressed(*key) && i.modifiers.is_none() {
-                        if let Some(db_type) = db_types.get(idx) {
-                            config.db_type = db_type.clone();
+                    if i.key_pressed(*key) && i.modifiers.is_none()
+                        && let Some(db_type) = db_types.get(idx) {
+                            config.db_type = *db_type;
                             config.port = db_type.default_port();
                             if config.host.is_empty() && !matches!(db_type, DatabaseType::SQLite) {
                                 config.host = "localhost".to_string();
                             }
                         }
-                    }
                 }
 
                 // h/l 切换数据库类型
                 if i.key_pressed(Key::H) && i.modifiers.is_none() {
                     let current_idx = db_types.iter().position(|t| *t == config.db_type).unwrap_or(0);
                     if current_idx > 0 {
-                        let new_type = &db_types[current_idx - 1];
-                        config.db_type = new_type.clone();
+                        let new_type = db_types[current_idx - 1];
+                        config.db_type = new_type;
                         config.port = new_type.default_port();
                         if config.host.is_empty() && !matches!(new_type, DatabaseType::SQLite) {
                             config.host = "localhost".to_string();
@@ -146,8 +143,8 @@ impl ConnectionDialog {
                 if i.key_pressed(Key::L) && i.modifiers.is_none() {
                     let current_idx = db_types.iter().position(|t| *t == config.db_type).unwrap_or(0);
                     if current_idx < db_types.len() - 1 {
-                        let new_type = &db_types[current_idx + 1];
-                        config.db_type = new_type.clone();
+                        let new_type = db_types[current_idx + 1];
+                        config.db_type = new_type;
                         config.port = new_type.default_port();
                         if config.host.is_empty() && !matches!(new_type, DatabaseType::SQLite) {
                             config.host = "localhost".to_string();
@@ -159,15 +156,13 @@ impl ConnectionDialog {
                 if matches!(config.db_type, DatabaseType::SQLite)
                     && i.key_pressed(Key::O)
                     && i.modifiers == Modifiers::CTRL
-                {
-                    if let Some(path) = rfd::FileDialog::new()
+                    && let Some(path) = rfd::FileDialog::new()
                         .add_filter("SQLite 数据库", &["db", "sqlite", "sqlite3"])
                         .add_filter("所有文件", &["*"])
                         .pick_file()
                     {
                         config.database = path.display().to_string();
                     }
-                }
             });
         }
 
@@ -270,7 +265,7 @@ impl ConnectionDialog {
                     .interact(egui::Sense::click());
 
                 if response.clicked() {
-                    config.db_type = db_type.clone();
+                    config.db_type = *db_type;
                     config.port = db_type.default_port();
                     if config.host.is_empty() && !matches!(db_type, DatabaseType::SQLite) {
                         config.host = "localhost".to_string();
@@ -362,15 +357,14 @@ impl ConnectionDialog {
                                 if ui.add(
                                     egui::Button::new("浏览 [Ctrl+O]")
                                         .corner_radius(CornerRadius::same(4))
-                                ).clicked() {
-                                    if let Some(path) = rfd::FileDialog::new()
+                                ).clicked()
+                                    && let Some(path) = rfd::FileDialog::new()
                                         .add_filter("SQLite 数据库", &["db", "sqlite", "sqlite3"])
                                         .add_filter("所有文件", &["*"])
                                         .pick_file()
                                     {
                                         config.database = path.display().to_string();
                                     }
-                                }
                             });
                             ui.end_row();
                         }
@@ -418,7 +412,7 @@ impl ConnectionDialog {
                                         );
                                         ui.selectable_value(
                                             &mut config.mysql_ssl_mode,
-                                            mode.clone(),
+                                            *mode,
                                             label,
                                         );
                                     }
@@ -437,15 +431,14 @@ impl ConnectionDialog {
                                             .hint_text("/path/to/ca-cert.pem")
                                             .desired_width(160.0),
                                     );
-                                    if ui.button("浏览").clicked() {
-                                        if let Some(path) = rfd::FileDialog::new()
+                                    if ui.button("浏览").clicked()
+                                        && let Some(path) = rfd::FileDialog::new()
                                             .add_filter("证书文件", &["pem", "crt", "cer"])
                                             .add_filter("所有文件", &["*"])
                                             .pick_file()
                                         {
                                             config.ssl_ca_cert = path.display().to_string();
                                         }
-                                    }
                                 });
                                 ui.end_row();
                             }
@@ -504,11 +497,10 @@ impl ConnectionDialog {
                                 if ui.add(
                                     TextEdit::singleline(&mut port_str)
                                         .desired_width(80.0),
-                                ).changed() {
-                                    if let Ok(port) = port_str.parse::<u16>() {
+                                ).changed()
+                                    && let Ok(port) = port_str.parse::<u16>() {
                                         config.ssh_config.ssh_port = port;
                                     }
-                                }
                                 ui.end_row();
 
                                 // SSH 用户名
@@ -555,14 +547,13 @@ impl ConnectionDialog {
                                                     .hint_text("~/.ssh/id_rsa")
                                                     .desired_width(160.0),
                                             );
-                                            if ui.button("浏览").clicked() {
-                                                if let Some(path) = rfd::FileDialog::new()
+                                            if ui.button("浏览").clicked()
+                                                && let Some(path) = rfd::FileDialog::new()
                                                     .add_filter("私钥文件", &["pem", "key", "*"])
                                                     .pick_file()
                                                 {
                                                     config.ssh_config.private_key_path = path.display().to_string();
                                                 }
-                                            }
                                         });
                                         ui.end_row();
 
@@ -593,11 +584,10 @@ impl ConnectionDialog {
                                     TextEdit::singleline(&mut remote_port_str)
                                         .hint_text("数据库端口")
                                         .desired_width(80.0),
-                                ).changed() {
-                                    if let Ok(port) = remote_port_str.parse::<u16>() {
+                                ).changed()
+                                    && let Ok(port) = remote_port_str.parse::<u16>() {
                                         config.ssh_config.remote_port = port;
                                     }
-                                }
                                 ui.end_row();
                             });
 

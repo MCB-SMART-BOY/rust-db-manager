@@ -384,7 +384,7 @@ pub struct DialogWindow;
 
 impl DialogWindow {
     /// 创建标准对话框窗口
-    pub fn new<'a>(title: &'a str, style: &DialogStyle) -> egui::Window<'a> {
+    pub fn standard<'a>(title: &'a str, style: &DialogStyle) -> egui::Window<'a> {
         egui::Window::new(title)
             .collapsible(false)
             .resizable(false)

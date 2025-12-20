@@ -157,9 +157,9 @@ pub fn generate_save_sql(
 
     // 生成 UPDATE 语句
     for ((row_idx, col_idx), new_value) in &state.modified_cells {
-        if let Some(row) = result.rows.get(*row_idx) {
-            if let Some(pk_value) = row.get(pk_idx) {
-                if let Some(col_name) = safe_columns.get(*col_idx) {
+        if let Some(row) = result.rows.get(*row_idx)
+            && let Some(pk_value) = row.get(pk_idx)
+                && let Some(col_name) = safe_columns.get(*col_idx) {
                     let safe_value = if new_value.is_empty() || new_value.eq_ignore_ascii_case("null") {
                         "NULL".to_string()
                     } else {
@@ -173,14 +173,12 @@ pub fn generate_save_sql(
                     );
                     sql_statements.push(sql);
                 }
-            }
-        }
     }
 
     // 生成 DELETE 语句
     for row_idx in &state.rows_to_delete {
-        if let Some(row) = result.rows.get(*row_idx) {
-            if let Some(pk_value) = row.get(pk_idx) {
+        if let Some(row) = result.rows.get(*row_idx)
+            && let Some(pk_value) = row.get(pk_idx) {
                 let safe_pk_value = escape_value(pk_value);
                 let sql = format!(
                     "DELETE FROM {} WHERE {} = {};",
@@ -188,7 +186,6 @@ pub fn generate_save_sql(
                 );
                 sql_statements.push(sql);
             }
-        }
     }
 
     // 生成 INSERT 语句

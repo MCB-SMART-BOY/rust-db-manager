@@ -93,8 +93,8 @@ impl ProgressIndicator {
                 }
 
                 // 取消按钮
-                if task.cancellable {
-                    if ui
+                if task.cancellable
+                    && ui
                         .add(
                             egui::Button::new(
                                 egui::RichText::new("x")
@@ -105,9 +105,8 @@ impl ProgressIndicator {
                         )
                         .on_hover_text("取消")
                         .clicked()
-                    {
-                        cancel_id = Some(task.id);
-                    }
+                {
+                    cancel_id = Some(task.id);
                 }
             });
 

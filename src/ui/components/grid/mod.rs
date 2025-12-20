@@ -120,11 +120,10 @@ impl DataGrid {
         if let Some((virtual_idx, col_idx, new_value)) = state.pending_new_row_edit.take() {
             // 计算新增行在 new_rows 中的索引
             let new_row_idx = virtual_idx.saturating_sub(result.rows.len());
-            if let Some(row_data) = state.new_rows.get_mut(new_row_idx) {
-                if col_idx < row_data.len() {
+            if let Some(row_data) = state.new_rows.get_mut(new_row_idx)
+                && col_idx < row_data.len() {
                     row_data[col_idx] = new_value;
                 }
-            }
         }
 
         // 处理 Ctrl+S 保存请求
@@ -429,11 +428,9 @@ impl DataGrid {
                     .add_enabled(has_changes, egui::Button::new("保存 [w]"))
                     .on_hover_text("保存所有修改到数据库\n快捷键: w 或 Ctrl+S")
                     .clicked()
-                {
-                    if let Some(table) = table_name {
+                    && let Some(table) = table_name {
                         actions::generate_save_sql(result, state, table, actions);
                     }
-                }
 
                 if ui
                     .add_enabled(has_changes, egui::Button::new("放弃 [q]"))
@@ -558,12 +555,11 @@ impl DataGrid {
 
                     // 回车确认
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        if let Ok(line) = state.goto_input.trim().parse::<usize>() {
-                            if line >= 1 && line <= max_row {
+                        if let Ok(line) = state.goto_input.trim().parse::<usize>()
+                            && line >= 1 && line <= max_row {
                                 state.cursor.0 = line - 1;
                                 state.scroll_to_row = Some(state.cursor.0);
                             }
-                        }
                         state.show_goto_dialog = false;
                         state.goto_input.clear();
                     }
@@ -571,12 +567,11 @@ impl DataGrid {
 
                 ui.horizontal(|ui| {
                     if ui.button("跳转 [Enter]").clicked() {
-                        if let Ok(line) = state.goto_input.trim().parse::<usize>() {
-                            if line >= 1 && line <= max_row {
+                        if let Ok(line) = state.goto_input.trim().parse::<usize>()
+                            && line >= 1 && line <= max_row {
                                 state.cursor.0 = line - 1;
                                 state.scroll_to_row = Some(state.cursor.0);
                             }
-                        }
                         state.show_goto_dialog = false;
                         state.goto_input.clear();
                     }

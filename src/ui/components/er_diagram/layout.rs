@@ -14,7 +14,7 @@ pub fn grid_layout(tables: &mut [ERTable], columns: usize, spacing: Vec2) {
     let columns = columns.max(1);
     
     // 计算每列的最大宽度和每行的最大高度
-    let rows = (tables.len() + columns - 1) / columns;
+    let rows = tables.len().div_ceil(columns);
     let mut col_widths: Vec<f32> = vec![180.0; columns]; // 默认宽度
     let mut row_heights: Vec<f32> = vec![120.0; rows];   // 默认高度
     
@@ -177,11 +177,10 @@ pub fn hierarchical_layout(
             let from_idx = tables.iter().position(|t| t.name == rel.from_table);
             let to_idx = tables.iter().position(|t| t.name == rel.to_table);
             
-            if let (Some(from), Some(to)) = (from_idx, to_idx) {
-                if levels[from] <= levels[to] {
+            if let (Some(from), Some(to)) = (from_idx, to_idx)
+                && levels[from] <= levels[to] {
                     levels[from] = levels[to] + 1;
                 }
-            }
         }
     }
 

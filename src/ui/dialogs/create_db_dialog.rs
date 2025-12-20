@@ -59,7 +59,7 @@ impl CreateDbDialogState {
     /// 打开对话框
     pub fn open(&mut self, db_type: DatabaseType) {
         self.reset();
-        self.db_type = db_type.clone();
+        self.db_type = db_type;
         self.show = true;
         
         // 设置默认值
