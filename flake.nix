@@ -43,7 +43,8 @@
             description = "Fast, secure, cross-platform database management tool with Helix/Vim keybindings";
             homepage = "https://github.com/MCB-SMART-BOY/Gridix";
             license = licenses.asl20;
-            maintainers = [];
+            maintainers = with maintainers; [ ];  # TODO: 添加 nixpkgs maintainer 后填写
+            mainProgram = "gridix";
             platforms = platforms.unix;
           };
         };
