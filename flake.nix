@@ -14,7 +14,7 @@
       {
         packages.default = pkgs.rustPlatform.buildRustPackage rec {
           pname = "gridix";
-          version = "0.5.2";
+          version = "2.0.0";
 
           src = ./.;
 
@@ -42,7 +42,7 @@
           meta = with pkgs.lib; {
             description = "Fast, secure, cross-platform database management tool with Helix/Vim keybindings";
             homepage = "https://github.com/MCB-SMART-BOY/Gridix";
-            license = licenses.mit;
+            license = licenses.asl20;
             maintainers = [];
             platforms = platforms.unix;
           };
