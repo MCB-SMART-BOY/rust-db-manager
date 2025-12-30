@@ -23,6 +23,8 @@ impl DbManagerApp {
 
             self.connecting = true;
             self.manager.active = Some(name.clone());
+            
+            tracing::info!(connection = %name, db_type = ?config.db_type, "开始连接数据库");
 
             self.runtime.spawn(async move {
                 use tokio::time::{timeout, Duration};
@@ -35,12 +37,17 @@ impl DbManagerApp {
                 .await;
                 let message = match result {
                     Ok(Ok(ConnectResult::Tables(tables))) => {
+                        tracing::info!(connection = %name, tables_count = tables.len(), "数据库连接成功");
                         Message::ConnectedWithTables(name, Ok(tables))
                     }
                     Ok(Ok(ConnectResult::Databases(databases))) => {
+                        tracing::info!(connection = %name, databases_count = databases.len(), "数据库连接成功，获取到数据库列表");
                         Message::ConnectedWithDatabases(name, Ok(databases))
                     }
-                    Ok(Err(e)) => Message::ConnectedWithTables(name, Err(e.to_string())),
+                    Ok(Err(e)) => {
+                        tracing::error!(connection = %name, error = %e, "数据库连接失败");
+                        Message::ConnectedWithTables(name, Err(e.to_string()))
+                    }
                     Err(_) => {
                         // 提供更详细的超时错误信息
                         let host_info = match &config.db_type {
@@ -159,21 +166,26 @@ impl DbManagerApp {
     /// 执行 SQL 查询
     pub(super) fn execute(&mut self, sql: String) {
         if sql.trim().is_empty() {
+            tracing::debug!("SQL 为空，跳过执行");
             return;
         }
 
         // 提前检查连接状态
         let Some(active_name) = &self.manager.active else {
+            tracing::warn!("尝试执行查询但未连接数据库");
             self.notifications.warning("请先连接数据库");
             return;
         };
         let Some(conn) = self.manager.connections.get(active_name) else {
+            tracing::warn!(connection = %active_name, "连接配置不存在");
             self.notifications.warning("请先连接数据库");
             return;
         };
 
         let config = conn.config.clone();
         let tx = self.tx.clone();
+        
+        tracing::info!(connection = %active_name, sql_length = sql.len(), "开始执行查询");
 
         // 添加到命令历史
         if self.command_history.first() != Some(&sql) {
@@ -211,12 +223,21 @@ impl DbManagerApp {
             .await;
             let elapsed_ms = start.elapsed().as_millis() as u64;
             let query_result = match result {
-                Ok(Ok(res)) => Ok(res),
-                Ok(Err(e)) => Err(e.to_string()),
-                Err(_) => Err(format!(
-                    "查询超时 ({}秒)。建议: 1) 添加 LIMIT 限制结果集 2) 优化查询条件 3) 检查索引",
-                    timeout_secs
-                )),
+                Ok(Ok(res)) => {
+                    tracing::info!(rows = res.rows.len(), columns = res.columns.len(), elapsed_ms, "查询执行成功");
+                    Ok(res)
+                }
+                Ok(Err(e)) => {
+                    tracing::error!(error = %e, elapsed_ms, "查询执行失败");
+                    Err(e.to_string())
+                }
+                Err(_) => {
+                    tracing::error!(timeout_secs, elapsed_ms, "查询执行超时");
+                    Err(format!(
+                        "查询超时 ({}秒)。建议: 1) 添加 LIMIT 限制结果集 2) 优化查询条件 3) 检查索引",
+                        timeout_secs
+                    ))
+                }
             };
             if tx
                 .send(Message::QueryDone(sql, query_result, elapsed_ms))

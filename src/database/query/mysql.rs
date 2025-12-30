@@ -91,11 +91,12 @@ pub async fn execute(config: &ConnectionConfig, sql: &str) -> Result<QueryResult
             .await
             .map_err(|e| DbError::Query(e.to_string()))?;
 
-        if result.is_empty() {
-            return Ok(empty_result());
-        }
+        let first_row = match result.first() {
+            Some(row) => row,
+            None => return Ok(empty_result()),
+        };
 
-        let columns: Vec<String> = result[0]
+        let columns: Vec<String> = first_row
             .columns_ref()
             .iter()
             .map(|c| c.name_str().into_owned())

@@ -1,7 +1,13 @@
 //! 帮助对话框 - 友好的使用指南
 //!
 //! 提供人性化的快速上手指南和功能说明
+//!
+//! 支持的快捷键：
+//! - `Esc` / `q` - 关闭对话框
+//! - `j` / `k` - 滚动内容
+//! - `Ctrl+d` / `Ctrl+u` - 快速滚动
 
+use super::keyboard::{self, ListNavigation};
 use egui::{self, Color32, Key, RichText, ScrollArea, Vec2};
 
 pub struct HelpDialog;
@@ -13,12 +19,8 @@ impl HelpDialog {
             return;
         }
 
-        // 处理键盘关闭
-        let should_close = ctx.input(|i| {
-            i.key_pressed(Key::Q) || i.key_pressed(Key::Escape)
-        });
-
-        if should_close {
+        // 使用统一的键盘模块处理关闭
+        if keyboard::handle_close_keys(ctx) {
             *open = false;
             return;
         }
@@ -45,15 +47,18 @@ impl HelpDialog {
                     .id_salt("help_scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        // 键盘滚动
-                        let scroll_delta = ui.input(|i| {
+                        // 使用统一的列表导航处理滚动
+                        let scroll_delta = match keyboard::handle_list_navigation(ctx) {
+                            ListNavigation::Up => -50.0,
+                            ListNavigation::Down => 50.0,
+                            ListNavigation::PageUp => -300.0,
+                            ListNavigation::PageDown => 300.0,
+                            _ => 0.0,
+                        };
+
+                        // 补充 Ctrl+d/u 快速滚动（兼容原有行为）
+                        let extra_delta = ctx.input(|i| {
                             let mut delta = 0.0f32;
-                            if i.key_pressed(Key::J) || i.key_pressed(Key::ArrowDown) {
-                                delta += 50.0;
-                            }
-                            if i.key_pressed(Key::K) || i.key_pressed(Key::ArrowUp) {
-                                delta -= 50.0;
-                            }
                             if i.modifiers.ctrl && i.key_pressed(Key::D) {
                                 delta += 300.0;
                             }
@@ -62,9 +67,10 @@ impl HelpDialog {
                             }
                             delta
                         });
-                        
-                        if scroll_delta != 0.0 {
-                            ui.scroll_with_delta(Vec2::new(0.0, -scroll_delta));
+
+                        let total_delta = scroll_delta + extra_delta;
+                        if total_delta != 0.0 {
+                            ui.scroll_with_delta(Vec2::new(0.0, -total_delta));
                         }
                         
                         ui.add_space(12.0);

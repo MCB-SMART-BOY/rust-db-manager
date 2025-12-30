@@ -9,6 +9,17 @@
 //! - 独立显示/隐藏（通过顶部工具栏按钮）
 //! - 独立折叠/展开（通过面板标题栏的折叠按钮）
 //! - 通过拖动分割条调整大小
+//!
+//! 键盘操作（统一使用 dialogs/keyboard 模块）：
+//! - `j/k` - 上下导航
+//! - `gg/G` - 跳转到首/末项
+//! - `h/l` - 层级切换（Tree 上下文）
+//! - `Enter` - 激活/选择
+//! - `Space` - 切换状态
+//! - `d` - 删除
+//! - `e` - 编辑
+//! - `r` - 重命名
+//! - `R` - 刷新
 
 mod state;
 mod actions;
@@ -31,7 +42,8 @@ use routine_panel::RoutinePanel;
 
 use crate::database::ConnectionManager;
 use crate::ui::SidebarSection;
-use egui::{self, Color32, CornerRadius, Vec2};
+use crate::ui::dialogs::keyboard::{self, ListNavigation, HorizontalNavigation};
+use egui::{self, Color32, CornerRadius, Key, Vec2};
 
 /// 分割条高度
 const DIVIDER_HEIGHT: f32 = 6.0;
@@ -355,98 +367,44 @@ impl Sidebar {
             SidebarSection::Filters => &mut panel_state.selection.filters,
         };
 
-        ctx.input(|i| {
-            // j 或下箭头：向下导航
-            if i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::ArrowDown) {
+        // === 使用统一键盘模块处理列表导航 ===
+        match keyboard::handle_list_navigation(ctx) {
+            ListNavigation::Down => {
                 *selected_index = (*selected_index + 1).min(item_count.saturating_sub(1));
                 panel_state.command_buffer.clear();
             }
-            // k 或上箭头：向上导航
-            if i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::ArrowUp) {
+            ListNavigation::Up => {
                 *selected_index = selected_index.saturating_sub(1);
                 panel_state.command_buffer.clear();
             }
-            
-            // === g 前缀命令 ===
-            // g：进入 g 命令模式或跳到第一个（gg）
-            if i.key_pressed(egui::Key::G) && !i.modifiers.shift {
-                if panel_state.command_buffer == "g" {
-                    // gg：跳到第一个
-                    *selected_index = 0;
-                    panel_state.command_buffer.clear();
-                } else {
-                    // 进入 g 命令模式
-                    panel_state.command_buffer = "g".to_string();
-                }
-            }
-            // gs：查看表结构（需要在 Tables section）
-            if i.key_pressed(egui::Key::S) && panel_state.command_buffer == "g" {
-                if let SidebarSection::Tables = focused_section {
-                    if let Some(conn) = connection_manager.get_active()
-                        && let Some(table) = conn.tables.get(*selected_index) {
-                            actions.show_table_schema = Some(table.clone());
-                        }
-                }
+            ListNavigation::Start => {
+                *selected_index = 0;
                 panel_state.command_buffer.clear();
             }
-            // G (Shift+g)：跳到最后一个
-            if i.key_pressed(egui::Key::G) && i.modifiers.shift {
+            ListNavigation::End => {
                 *selected_index = item_count.saturating_sub(1);
                 panel_state.command_buffer.clear();
             }
-            // Enter：选择/激活当前项
-            if i.key_pressed(egui::Key::Enter) {
-                match focused_section {
-                    SidebarSection::Connections => {
-                        let names: Vec<_> = connection_manager.connections.keys().cloned().collect();
-                        if let Some(name) = names.get(*selected_index) {
-                            actions.connect = Some(name.clone());
-                        }
-                    }
-                    SidebarSection::Databases => {
-                        if let Some(conn) = connection_manager.get_active()
-                            && let Some(db) = conn.databases.get(*selected_index) {
-                                actions.select_database = Some(db.clone());
-                            }
-                    }
-                    SidebarSection::Tables => {
-                        if let Some(conn) = connection_manager.get_active()
-                            && let Some(table) = conn.tables.get(*selected_index) {
-                                actions.query_table = Some(table.clone());
-                                *selected_table = Some(table.clone());
-                            }
-                    }
-                    SidebarSection::Triggers => {
-                        if let Some(trigger) = panel_state.triggers.get(*selected_index) {
-                            actions.show_trigger_definition = Some(trigger.definition.clone());
-                        }
-                    }
-                    SidebarSection::Routines => {
-                        if let Some(routine) = panel_state.routines.get(*selected_index) {
-                            actions.show_routine_definition = Some(routine.definition.clone());
-                        }
-                    }
-                    SidebarSection::Filters => {
-                        // Enter 切换筛选条件的启用状态
-                        if let Some(filter) = filters.get_mut(*selected_index) {
-                            filter.enabled = !filter.enabled;
-                            actions.filter_changed = true;
-                        }
+            ListNavigation::Toggle => {
+                // Space：在 Filters section 切换启用状态
+                if focused_section == SidebarSection::Filters {
+                    if let Some(filter) = filters.get_mut(*selected_index) {
+                        filter.enabled = !filter.enabled;
+                        actions.filter_changed = true;
                     }
                 }
             }
-            
-            // Space：在 Filters section 切换启用状态
-            if i.key_pressed(egui::Key::Space) && focused_section == SidebarSection::Filters {
-                if let Some(filter) = filters.get_mut(*selected_index) {
-                    filter.enabled = !filter.enabled;
-                    actions.filter_changed = true;
-                }
+            ListNavigation::Delete => {
+                // dd：删除选中项
+                Self::handle_delete_action(focused_section, *selected_index, connection_manager, filters, actions);
             }
+            _ => {}
+        }
 
-            // h 或左箭头：向上层级导航
-            // 顺序：存储过程 <- 触发器 <- 筛选 <- 表 <- 数据库 <- 连接
-            if i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::ArrowLeft) {
+        // === 使用统一键盘模块处理水平导航（层级切换）===
+        match keyboard::handle_horizontal_navigation(ctx) {
+            HorizontalNavigation::Left => {
+                // h：向上层级导航
                 let new_section = match focused_section {
                     SidebarSection::Routines => Some(SidebarSection::Triggers),
                     SidebarSection::Triggers => Some(SidebarSection::Filters),
@@ -465,10 +423,8 @@ impl Sidebar {
                     actions.section_change = Some(section);
                 }
             }
-
-            // l 或右箭头：向下层级导航
-            // 顺序：连接 -> 数据库 -> 表 -> 筛选 -> 触发器 -> 存储过程
-            if i.key_pressed(egui::Key::L) || i.key_pressed(egui::Key::ArrowRight) {
+            HorizontalNavigation::Right => {
+                // l：向下层级导航
                 let conn = connection_manager.get_active();
                 let has_databases = conn.map(|c| !c.databases.is_empty()).unwrap_or(false);
                 let has_tables = conn.map(|c| !c.tables.is_empty()).unwrap_or(false);
@@ -521,9 +477,66 @@ impl Sidebar {
                     actions.focus_transfer = Some(SidebarFocusTransfer::ToDataGrid);
                 }
             }
+            HorizontalNavigation::None => {}
+        }
+
+        // === 其他快捷键处理（保持 ctx.input 方式）===
+        ctx.input(|i| {
+            // gs：查看表结构（需要在 Tables section）
+            if i.key_pressed(Key::S) && panel_state.command_buffer == "g" {
+                if let SidebarSection::Tables = focused_section {
+                    if let Some(conn) = connection_manager.get_active()
+                        && let Some(table) = conn.tables.get(*selected_index) {
+                            actions.show_table_schema = Some(table.clone());
+                        }
+                }
+                panel_state.command_buffer.clear();
+            }
+
+            // Enter：选择/激活当前项
+            if i.key_pressed(Key::Enter) {
+                match focused_section {
+                    SidebarSection::Connections => {
+                        let names: Vec<_> = connection_manager.connections.keys().cloned().collect();
+                        if let Some(name) = names.get(*selected_index) {
+                            actions.connect = Some(name.clone());
+                        }
+                    }
+                    SidebarSection::Databases => {
+                        if let Some(conn) = connection_manager.get_active()
+                            && let Some(db) = conn.databases.get(*selected_index) {
+                                actions.select_database = Some(db.clone());
+                            }
+                    }
+                    SidebarSection::Tables => {
+                        if let Some(conn) = connection_manager.get_active()
+                            && let Some(table) = conn.tables.get(*selected_index) {
+                                actions.query_table = Some(table.clone());
+                                *selected_table = Some(table.clone());
+                            }
+                    }
+                    SidebarSection::Triggers => {
+                        if let Some(trigger) = panel_state.triggers.get(*selected_index) {
+                            actions.show_trigger_definition = Some(trigger.definition.clone());
+                        }
+                    }
+                    SidebarSection::Routines => {
+                        if let Some(routine) = panel_state.routines.get(*selected_index) {
+                            actions.show_routine_definition = Some(routine.definition.clone());
+                        }
+                    }
+                    SidebarSection::Filters => {
+                        // Enter 切换筛选条件的启用状态
+                        if let Some(filter) = filters.get_mut(*selected_index) {
+                            filter.enabled = !filter.enabled;
+                            actions.filter_changed = true;
+                        }
+                    }
+                }
+            }
 
             // d：删除选中项（连接/表/筛选条件）
-            if i.key_pressed(egui::Key::D) && !i.modifiers.ctrl && !i.modifiers.shift {
+            if i.key_pressed(Key::D) && !i.modifiers.ctrl && !i.modifiers.shift {
                 match focused_section {
                     SidebarSection::Connections => {
                         let names: Vec<_> = connection_manager.connections.keys().cloned().collect();
@@ -554,7 +567,7 @@ impl Sidebar {
             }
             
             // x：在 Filters section 也支持删除（Helix 风格）
-            if i.key_pressed(egui::Key::X) && focused_section == SidebarSection::Filters {
+            if i.key_pressed(Key::X) && focused_section == SidebarSection::Filters {
                 if *selected_index < filters.len() {
                     filters.remove(*selected_index);
                     if *selected_index >= filters.len() && !filters.is_empty() {
@@ -565,7 +578,7 @@ impl Sidebar {
             }
 
             // e：编辑选中的连接配置
-            if i.key_pressed(egui::Key::E) && !i.modifiers.ctrl {
+            if i.key_pressed(Key::E) && !i.modifiers.ctrl {
                 if let SidebarSection::Connections = focused_section {
                     let names: Vec<_> = connection_manager.connections.keys().cloned().collect();
                     if let Some(name) = names.get(*selected_index) {
@@ -575,7 +588,7 @@ impl Sidebar {
             }
 
             // r：重命名选中项
-            if i.key_pressed(egui::Key::R) && !i.modifiers.ctrl {
+            if i.key_pressed(Key::R) && !i.modifiers.ctrl {
                 let item_name = match focused_section {
                     SidebarSection::Connections => {
                         let names: Vec<_> = connection_manager.connections.keys().cloned().collect();
@@ -593,7 +606,7 @@ impl Sidebar {
             }
 
             // R (Shift+r)：刷新当前列表
-            if i.key_pressed(egui::Key::R) && i.modifiers.shift {
+            if i.key_pressed(Key::R) && i.modifiers.shift {
                 actions.refresh = true;
             }
 
@@ -613,31 +626,31 @@ impl Sidebar {
             //
             if focused_section == SidebarSection::Filters {
                 // a/o：增加筛选条件（Helix: a = append, o = open below）
-                if i.key_pressed(egui::Key::A) || i.key_pressed(egui::Key::O) {
+                if i.key_pressed(Key::A) || i.key_pressed(Key::O) {
                     actions.add_filter = true;
                 }
                 
                 // c：清空所有筛选条件（Helix: c = change）
-                if i.key_pressed(egui::Key::C) && !i.modifiers.ctrl {
+                if i.key_pressed(Key::C) && !i.modifiers.ctrl {
                     actions.clear_filters = true;
                 }
                 
                 // w：切换筛选对象（列）到下一个（Helix: w = word forward）
-                if i.key_pressed(egui::Key::W) && !i.modifiers.ctrl {
+                if i.key_pressed(Key::W) && !i.modifiers.ctrl {
                     if *selected_index < filters.len() {
                         actions.cycle_filter_column = Some((*selected_index, true));
                     }
                 }
                 
                 // b：切换筛选对象（列）到上一个（Helix: b = word backward）
-                if i.key_pressed(egui::Key::B) && !i.modifiers.ctrl {
+                if i.key_pressed(Key::B) && !i.modifiers.ctrl {
                     if *selected_index < filters.len() {
                         actions.cycle_filter_column = Some((*selected_index, false));
                     }
                 }
                 
                 // n：切换筛选规则（操作符）到下一个（Helix: n = next search）
-                if i.key_pressed(egui::Key::N) && !i.modifiers.ctrl && !i.modifiers.shift {
+                if i.key_pressed(Key::N) && !i.modifiers.ctrl && !i.modifiers.shift {
                     if let Some(filter) = filters.get_mut(*selected_index) {
                         filter.operator = next_operator(&filter.operator);
                         actions.filter_changed = true;
@@ -645,7 +658,7 @@ impl Sidebar {
                 }
                 
                 // N (Shift+n)：切换筛选规则（操作符）到上一个
-                if i.key_pressed(egui::Key::N) && i.modifiers.shift {
+                if i.key_pressed(Key::N) && i.modifiers.shift {
                     if let Some(filter) = filters.get_mut(*selected_index) {
                         filter.operator = prev_operator(&filter.operator);
                         actions.filter_changed = true;
@@ -653,21 +666,21 @@ impl Sidebar {
                 }
                 
                 // t：切换当前筛选条件的 AND/OR 逻辑
-                if i.key_pressed(egui::Key::T) {
+                if i.key_pressed(Key::T) {
                     if *selected_index < filters.len() {
                         actions.toggle_filter_logic = Some(*selected_index);
                     }
                 }
                 
                 // i：编辑筛选值（Helix: i = insert mode）
-                if i.key_pressed(egui::Key::I) {
+                if i.key_pressed(Key::I) {
                     if *selected_index < filters.len() {
                         actions.focus_filter_input = Some(*selected_index);
                     }
                 }
                 
                 // s：切换大小写敏感（Helix: s = select）
-                if i.key_pressed(egui::Key::S) && panel_state.command_buffer.is_empty() {
+                if i.key_pressed(Key::S) && panel_state.command_buffer.is_empty() {
                     if let Some(filter) = filters.get_mut(*selected_index) {
                         if filter.operator.supports_case_sensitivity() {
                             filter.case_sensitive = !filter.case_sensitive;
@@ -681,6 +694,38 @@ impl Sidebar {
         // 同步到旧的 trigger_selected_index 字段（保持向后兼容）
         if focused_section == SidebarSection::Triggers {
             panel_state.trigger_selected_index = panel_state.selection.triggers;
+        }
+    }
+
+    /// 处理删除操作（从 ListNavigation::Delete 调用）
+    fn handle_delete_action(
+        focused_section: SidebarSection,
+        selected_index: usize,
+        connection_manager: &ConnectionManager,
+        filters: &mut Vec<crate::ui::ColumnFilter>,
+        actions: &mut SidebarActions,
+    ) {
+        match focused_section {
+            SidebarSection::Connections => {
+                let names: Vec<_> = connection_manager.connections.keys().cloned().collect();
+                if let Some(name) = names.get(selected_index) {
+                    actions.delete = Some(name.clone());
+                }
+            }
+            SidebarSection::Tables => {
+                if let Some(conn) = connection_manager.get_active() {
+                    if let Some(table) = conn.tables.get(selected_index) {
+                        actions.delete = Some(format!("table:{}", table));
+                    }
+                }
+            }
+            SidebarSection::Filters => {
+                if selected_index < filters.len() {
+                    filters.remove(selected_index);
+                    actions.filter_changed = true;
+                }
+            }
+            _ => {}
         }
     }
 

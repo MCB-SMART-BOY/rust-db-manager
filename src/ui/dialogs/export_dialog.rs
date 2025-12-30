@@ -1,15 +1,16 @@
 //! 数据导出对话框 - 支持多种格式和自定义选项
 //!
 //! 支持的快捷键：
-//! - `Esc` - 关闭对话框
+//! - `Esc` / `q` - 关闭对话框
 //! - `Enter` - 导出（当配置有效时）
 //! - `1/2/3` - 快速选择格式 (CSV/SQL/JSON)
 //! - `h/l` - 切换格式
 //! - `j/k` - 在列选择中导航
+//! - `gg/G` - 跳转到首/末列
 //! - `Space` - 切换当前列的选中状态
 //! - `a` - 全选/取消全选列
 
-use super::keyboard;
+use super::keyboard::{self, DialogAction, ListNavigation};
 use crate::core::ExportFormat;
 use crate::database::QueryResult;
 use crate::ui::styles::{DANGER, GRAY, MUTED, SUCCESS, SPACING_SM, SPACING_MD};
@@ -117,18 +118,44 @@ impl ExportDialog {
 
         // 处理键盘快捷键（仅当没有文本输入焦点时）
         if !keyboard::has_text_focus(ctx) {
-            // Esc 关闭
+            // Esc/q 关闭
             if keyboard::handle_close_keys(ctx) {
                 *show = false;
                 return;
             }
 
             // Enter 导出
-            if can_export
-                && let keyboard::DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
+            if can_export {
+                if let DialogAction::Confirm = keyboard::handle_dialog_keys(ctx) {
                     *on_export = Some(config.clone());
                     return;
                 }
+            }
+
+            // 使用统一的列表导航处理 j/k/gg/G
+            if col_count > 0 {
+                match keyboard::handle_list_navigation(ctx) {
+                    ListNavigation::Up => {
+                        config.nav_column_index = config.nav_column_index.saturating_sub(1);
+                    }
+                    ListNavigation::Down => {
+                        config.nav_column_index = (config.nav_column_index + 1).min(col_count - 1);
+                    }
+                    ListNavigation::Start => {
+                        config.nav_column_index = 0;
+                    }
+                    ListNavigation::End => {
+                        config.nav_column_index = col_count.saturating_sub(1);
+                    }
+                    ListNavigation::Toggle => {
+                        // Space 切换当前列
+                        if let Some(selected) = config.selected_columns.get_mut(config.nav_column_index) {
+                            *selected = !*selected;
+                        }
+                    }
+                    _ => {}
+                }
+            }
 
             ctx.input(|i| {
                 // 数字键快速选择格式: 1=CSV, 2=SQL, 3=JSON
@@ -142,7 +169,7 @@ impl ExportDialog {
                     config.format = ExportFormat::Json;
                 }
 
-                // h/l 切换格式
+                // h/l 切换格式（选项切换）
                 if i.key_pressed(Key::H) || i.key_pressed(Key::ArrowLeft) {
                     config.format = match config.format {
                         ExportFormat::Csv => ExportFormat::Json,
@@ -158,33 +185,11 @@ impl ExportDialog {
                     };
                 }
 
-                // j/k 列选择导航
-                if col_count > 0 {
-                    if i.key_pressed(Key::J) || i.key_pressed(Key::ArrowDown) {
-                        config.nav_column_index = (config.nav_column_index + 1).min(col_count - 1);
-                    }
-                    if i.key_pressed(Key::K) || i.key_pressed(Key::ArrowUp) {
-                        config.nav_column_index = config.nav_column_index.saturating_sub(1);
-                    }
-                    if i.key_pressed(Key::G) && !i.modifiers.shift {
-                        config.nav_column_index = 0;
-                    }
-                    if i.key_pressed(Key::G) && i.modifiers.shift {
-                        config.nav_column_index = col_count.saturating_sub(1);
-                    }
-
-                    // Space 切换当前列
-                    if i.key_pressed(Key::Space)
-                        && let Some(selected) = config.selected_columns.get_mut(config.nav_column_index) {
-                            *selected = !*selected;
-                        }
-
-                    // a 全选/取消全选
-                    if i.key_pressed(Key::A) {
-                        let all_selected = config.all_columns_selected();
-                        for s in &mut config.selected_columns {
-                            *s = !all_selected;
-                        }
+                // a 全选/取消全选
+                if col_count > 0 && i.key_pressed(Key::A) {
+                    let all_selected = config.all_columns_selected();
+                    for s in &mut config.selected_columns {
+                        *s = !all_selected;
                     }
                 }
             });

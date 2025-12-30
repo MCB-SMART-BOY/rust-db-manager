@@ -37,45 +37,7 @@ impl ExportFormat {
 }
 
 // ============================================================================
-// 导入格式
-// ============================================================================
-
-/// 导入格式（供导入对话框使用）
-#[allow(dead_code)] // 公开 API，供外部使用
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ImportFormat {
-    Csv,
-    Json,
-}
-
-#[allow(dead_code)] // 公开 API，供外部使用
-impl ImportFormat {
-    pub fn extension(&self) -> &str {
-        match self {
-            ImportFormat::Csv => "csv",
-            ImportFormat::Json => "json",
-        }
-    }
-
-    pub fn display_name(&self) -> &str {
-        match self {
-            ImportFormat::Csv => "CSV",
-            ImportFormat::Json => "JSON",
-        }
-    }
-
-    /// 从文件扩展名推断格式
-    pub fn from_extension(ext: &str) -> Option<Self> {
-        match ext.to_lowercase().as_str() {
-            "csv" => Some(ImportFormat::Csv),
-            "json" => Some(ImportFormat::Json),
-            _ => None,
-        }
-    }
-}
-
-// ============================================================================
-// 导入配置
+// 导入配置（简化版，供 core 导入函数使用）
 // ============================================================================
 
 /// CSV 导入配置
@@ -126,7 +88,7 @@ pub struct JsonImportConfig {
 // 导入结果
 // ============================================================================
 
-/// 导入预览结果（供导入对话框使用）
+/// 导入预览结果
 #[derive(Debug, Clone)]
 pub struct ImportPreview {
     /// 列名
@@ -139,18 +101,11 @@ pub struct ImportPreview {
     pub warnings: Vec<String>,
 }
 
-/// 导入结果（供导入对话框使用）
-#[allow(dead_code)] // 公开 API，供外部使用
+/// 导入结果
 #[derive(Debug, Clone)]
 pub struct ImportResult {
     /// 生成的 SQL 语句
     pub sql_statements: Vec<String>,
-    /// 成功导入的行数
-    pub rows_imported: usize,
-    /// 跳过的行数
-    pub rows_skipped: usize,
-    /// 警告信息
-    pub warnings: Vec<String>,
 }
 
 // ============================================================================
@@ -354,10 +309,8 @@ pub fn import_csv_to_sql(
     let reader = BufReader::new(file);
     
     let mut lines = reader.lines();
-    let mut warnings = Vec::new();
     let mut sql_statements = Vec::new();
     let mut rows_imported = 0;
-    let mut rows_skipped = 0;
     
     // 跳过指定行数
     for _ in 0..config.skip_rows {
@@ -399,18 +352,14 @@ pub fn import_csv_to_sql(
     );
     
     // 处理数据行
-    for (idx, line_result) in lines.enumerate() {
+    for line_result in lines {
         if config.max_rows > 0 && rows_imported >= config.max_rows {
             break;
         }
         
         let line = match line_result {
             Ok(l) => l,
-            Err(e) => {
-                warnings.push(format!("第 {} 行读取失败: {}", idx + 1, e));
-                rows_skipped += 1;
-                continue;
-            }
+            Err(_) => continue,
         };
         
         if line.trim().is_empty() {
@@ -421,11 +370,6 @@ pub fn import_csv_to_sql(
         
         // 检查字段数
         if fields.len() != columns.len() {
-            warnings.push(format!(
-                "第 {} 行字段数不匹配，跳过",
-                idx + 1
-            ));
-            rows_skipped += 1;
             continue;
         }
         
@@ -444,12 +388,7 @@ pub fn import_csv_to_sql(
         rows_imported += 1;
     }
     
-    Ok(ImportResult {
-        sql_statements,
-        rows_imported,
-        rows_skipped,
-        warnings,
-    })
+    Ok(ImportResult { sql_statements })
 }
 
 /// 解析 CSV 行
@@ -568,9 +507,6 @@ pub fn import_json_to_sql(
     if array.is_empty() {
         return Ok(ImportResult {
             sql_statements: Vec::new(),
-            rows_imported: 0,
-            rows_skipped: 0,
-            warnings: vec!["JSON 数组为空".to_string()],
         });
     }
     
@@ -578,10 +514,8 @@ pub fn import_json_to_sql(
         return Err("未指定目标表名".to_string());
     }
     
-    let mut warnings = Vec::new();
     let mut sql_statements = Vec::new();
     let mut rows_imported = 0;
-    let mut rows_skipped = 0;
     
     // 从第一个对象提取列名
     let columns: Vec<String> = match &array[0] {
@@ -603,7 +537,7 @@ pub fn import_json_to_sql(
         quote_char
     );
     
-    for (idx, item) in array.iter().enumerate() {
+    for item in array.iter() {
         if config.max_rows > 0 && rows_imported >= config.max_rows {
             break;
         }
@@ -620,8 +554,6 @@ pub fn import_json_to_sql(
         };
         
         if values.is_empty() {
-            warnings.push(format!("第 {} 项数据为空，跳过", idx + 1));
-            rows_skipped += 1;
             continue;
         }
         
@@ -633,12 +565,7 @@ pub fn import_json_to_sql(
         rows_imported += 1;
     }
     
-    Ok(ImportResult {
-        sql_statements,
-        rows_imported,
-        rows_skipped,
-        warnings,
-    })
+    Ok(ImportResult { sql_statements })
 }
 
 /// 从 JSON 值中提取数组

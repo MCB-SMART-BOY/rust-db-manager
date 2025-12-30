@@ -42,6 +42,17 @@ fn init_tracing() {
 fn main() -> eframe::Result<()> {
     // 初始化日志系统
     init_tracing();
+    
+    // 设置 panic hook，在崩溃时记录详细信息
+    std::panic::set_hook(Box::new(|panic_info| {
+        let location = panic_info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_else(|| "未知位置".to_string());
+        let message = panic_info.payload().downcast_ref::<&str>().map(|s| s.to_string())
+            .or_else(|| panic_info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "未知错误".to_string());
+        tracing::error!(location = %location, message = %message, "程序崩溃 (panic)");
+        eprintln!("\n程序崩溃!\n位置: {}\n信息: {}\n\n请检查日志获取更多信息。", location, message);
+    }));
+    
     tracing::info!("Gridix 启动中...");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

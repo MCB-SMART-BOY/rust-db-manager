@@ -196,9 +196,9 @@ impl KeyBindingsDialog {
 
                                     if is_recording {
                                         // 显示录制中状态
-                                        let recording_text = if state.recorded_key.is_some() {
+                                        let recording_text = if let Some(key) = state.recorded_key {
                                             let binding = KeyBinding::new(
-                                                state.recorded_key.unwrap(),
+                                                key,
                                                 state.recorded_modifiers,
                                             );
                                             binding.display()
